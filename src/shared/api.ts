@@ -1,0 +1,103 @@
+/** JSON shapes exchanged between the server and the web app. */
+import type { CategoryKind } from "./taxonomy.js";
+
+export interface CategoryDto {
+  id: string;
+  parentId: string | null;
+  name: string;
+  kind: CategoryKind;
+  sort: number;
+}
+
+export interface TxnDto {
+  id: number;
+  date: string;
+  amount: number;
+  currency: string;
+  merchant: string;
+  merchantKey: string;
+  description: string;
+  accountName: string | null;
+  type: "withdrawal" | "deposit" | "transfer";
+  pending: boolean;
+  plaidPrimary: string | null;
+  plaidDetailed: string | null;
+  categoryId: string | null;
+  /** `plaid`, `backend`, `manual`, `rule:<id>`, or `none`. */
+  provenance: string;
+}
+
+export interface Breadcrumb {
+  key: string | null;
+  label: string;
+}
+
+export interface ReportRow {
+  key: string;
+  label: string;
+  value: number;
+  [extra: string]: unknown;
+}
+
+export interface ReportData {
+  reportId: string;
+  level: number;
+  levels: number;
+  /** Whether a datum at this level can be tapped to drill further. */
+  canDrill: boolean;
+  breadcrumbs: Breadcrumb[];
+  rows: ReportRow[];
+  total: number;
+}
+
+export interface TxnPage {
+  items: TxnDto[];
+  nextCursor: string | null;
+  total: number;
+}
+
+export interface UiContext {
+  reportId?: string;
+  drillPath?: string[];
+  from?: string;
+  to?: string;
+  surface?: string;
+}
+
+export interface RecategorizeRequest {
+  categoryId: string;
+  uiContext?: UiContext;
+  /** Create an "always categorize this merchant as X" rule at the same time. */
+  merchantRule?: { applyToPast: boolean };
+}
+
+export interface RecategorizeResponse {
+  txn: TxnDto;
+  rule?: { id: number; version: number; backfilled: number };
+}
+
+export interface RulePreview {
+  count: number;
+  sample: TxnDto[];
+}
+
+export interface RuleDto {
+  id: number;
+  version: number;
+  definition: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionDto {
+  email: string;
+  csrfToken: string;
+  devBypass: boolean;
+}
+
+export interface SuggestionsDto {
+  /** Categories most likely for this transaction, best first. */
+  likely: string[];
+  /** Categories recently chosen by hand, most recent first. */
+  recent: string[];
+}

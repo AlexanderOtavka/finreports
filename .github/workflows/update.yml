@@ -1,0 +1,51 @@
+name: Update dependencies
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays at 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      # flake.lock (nixpkgs: Node, PostgreSQL, Chromium, the image's base), then npm
+      # packages within package.json's ranges. The Nix build reads package-lock.json
+      # directly, so there is no hash to refresh after it.
+      - name: Update flake.lock and package-lock.json
+        run: |
+          nix flake update
+          nix develop -c npm update --package-lock-only --no-audit --no-fund
+
+      - name: Open or update the PR
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automated/update-deps
+          commit-message: Update dependencies
+          title: Update dependencies
+          labels: dependencies
+          body: |
+            Weekly update of `flake.lock` (`nix flake update`) and `package-lock.json`
+            (`npm update`, within the ranges in `package.json`).
+
+            CI runs on this branch by dispatch, and merges the PR if it passes. Major npm
+            upgrades need `package.json` edits and are left to a person.
+
+      # A PR opened with GITHUB_TOKEN triggers no pull_request run, so start CI by hand.
+      - name: Run CI on the branch
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --ref automated/update-deps
