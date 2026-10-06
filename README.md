@@ -60,7 +60,8 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   decided categories back through the adapter. A failed write stays queued (`backend_dirty`)
   and is retried. A full listing every `FULL_SYNC_INTERVAL_HOURS` notices deletions.
 - **Web app** (`src/web/`): Vite + React + ECharts, built into `dist/web` and served by the
-  same Fastify server under `/reports/`. Installable as a PWA.
+  same Fastify server under `/reports/`. Installable as a PWA. It borrows Firefly III's look
+  (AdminLTE's blue navbar and boxes) so it sits comfortably next to it.
 
 ## Categories, rules and provenance
 
@@ -135,6 +136,7 @@ e.g. a mounted Kubernetes Secret).
 | `ALLOWED_HOSTS` | host of `PUBLIC_ORIGIN` | Other Host headers get 421 (health is exempt). |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS` | `30`, `8` | Session cookie `REPORTSSESSION`, `Path=/reports; Secure; HttpOnly; SameSite=Lax`. |
 | `SYNC_INTERVAL_SECONDS`, `FULL_SYNC_INTERVAL_HOURS`, `SYNC_ENABLED` | `300`, `24`, `true` | |
+| `NAV_LINKS` | none | Links to other apps in the top bar, as JSON: `[{"label": "Ledger", "url": "/"}, {"label": "Bank sync", "url": "https://bank-sync.example.com", "newTab": true}]`. A URL is `http(s)://…` or a path on this origin; `newTab` is optional. |
 | `SAMPLE_SEED`, `SAMPLE_END_DATE` | `235`, today | The sample dataset. |
 | `DEV_AUTH_BYPASS` | unset | See below. |
 | `LOG_LEVEL` | `info` | |

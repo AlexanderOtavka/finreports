@@ -127,7 +127,7 @@ export function RecategorizeSheet({ txn, categories, uiContext, onClose, onSave 
         <header className="sheet-header">
           <div className="sheet-title-row">
             <h2 id="sheet-title">{merchant}</h2>
-            <span className={`sheet-amount${txn.amount > 0 ? " inflow" : ""}`}>
+            <span className={`sheet-amount ${txn.type === "transfer" ? "transfer" : txn.amount > 0 ? "inflow" : "outflow"}`}>
               {txn.amount > 0 ? "+" : ""}
               {formatMoney(Math.abs(txn.amount))}
             </span>

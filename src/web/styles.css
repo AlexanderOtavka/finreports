@@ -1,24 +1,42 @@
+/*
+ * The look follows Firefly III's (AdminLTE 2, "skin-blue-light"): a blue navbar with a
+ * darker logo block, a gray page, white boxes with a colored top border, Bootstrap 3
+ * buttons and labels, and red, green and blue amounts for money out, in, and moved.
+ */
 :root {
   color-scheme: light;
-  --bg: #f3f3f0;
-  --surface: #fcfcfb;
-  --surface-2: #f0efec;
-  --border: #e3e2dd;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --text-3: #75746f;
-  --accent: #2a78d6;
+  --bg: #ecf0f5;
+  --surface: #ffffff;
+  --surface-2: #f4f4f4;
+  --hover: #f5f5f5;
+  --border: #dddddd;
+  --border-soft: #f4f4f4;
+  --text: #333333;
+  --text-2: #555555;
+  --text-3: #777777;
+  --accent: #3c8dbc;
+  --accent-dark: #367fa9;
   --accent-ink: #ffffff;
-  --accent-soft: #e3eefb;
-  --inflow: #1d7a4f;
-  --error: #b42318;
-  --topbar: #141b2d;
-  --topbar-ink: #ffffff;
-  --radius: 14px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 16px rgb(0 0 0 / 5%);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 16px;
-  line-height: 1.35;
+  --accent-soft: #e5f0f7;
+  --link: #3c8dbc;
+  --outflow: #dd4b39;
+  --inflow: #00a65a;
+  --transfer: #3c8dbc;
+  --warning: #f39c12;
+  --info: #00c0ef;
+  --label-default: #d2d6de;
+  --label-default-ink: #444444;
+  --error: #dd4b39;
+  --navbar: #3c8dbc;
+  --logo: #367fa9;
+  --navbar-ink: #ffffff;
+  --btn: #f4f4f4;
+  --btn-ink: #444444;
+  --radius: 3px;
+  --shadow: 0 1px 1px rgb(0 0 0 / 10%);
+  font-family: "Source Sans Pro", "Source Sans 3", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.42857;
   color: var(--text);
   background: var(--bg);
   -webkit-text-size-adjust: 100%;
@@ -28,19 +46,30 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #111110;
-    --surface: #1a1a19;
-    --surface-2: #252523;
-    --border: #2f2f2c;
-    --text: #ffffff;
-    --text-2: #c3c2b7;
-    --text-3: #9a998f;
-    --accent: #3987e5;
-    --accent-soft: #1b2b40;
-    --inflow: #4cc38a;
-    --error: #ff8a80;
-    --topbar: #0b0f19;
-    --shadow: none;
+    --bg: #222d32;
+    --surface: #2c3b41;
+    --surface-2: #34464d;
+    --hover: #34464d;
+    --border: #415761;
+    --border-soft: #374850;
+    --text: #e8ecee;
+    --text-2: #b8c7ce;
+    --text-3: #8aa4af;
+    --accent: #3c8dbc;
+    --accent-dark: #367fa9;
+    --accent-soft: #24475d;
+    --link: #72afd2;
+    --outflow: #f1786a;
+    --inflow: #3fd38f;
+    --transfer: #72afd2;
+    --label-default: #4b636e;
+    --label-default-ink: #e8ecee;
+    --error: #f1786a;
+    --navbar: #2a6a90;
+    --logo: #245c7d;
+    --btn: #34464d;
+    --btn-ink: #e8ecee;
+    --shadow: 0 1px 1px rgb(0 0 0 / 30%);
   }
 }
 
@@ -56,6 +85,11 @@ body {
 button {
   font: inherit;
   color: inherit;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
 }
 
 .muted {
@@ -75,68 +109,153 @@ button {
 }
 
 .app {
-  max-width: 720px;
-  margin: 0 auto;
   padding-bottom: calc(2rem + env(safe-area-inset-bottom));
 }
+/* One column up to tablets in portrait, two from 1000px; the tabs line up with it. */
+:root {
+  --page-max: 960px;
+}
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+}
 
-/* --- Top bar and report tabs ----------------------------------------------------------- */
+/* --- Top bar: navbar, links to other apps, report tabs --------------------------------- */
 
 .topbar {
-  background: var(--topbar);
-  color: var(--topbar-ink);
-  padding: calc(0.75rem + env(safe-area-inset-top)) 1rem 0;
   position: sticky;
   top: 0;
   z-index: 5;
+  box-shadow: var(--shadow);
 }
-.topbar-row {
+.navbar {
+  display: flex;
+  align-items: stretch;
+  min-height: 50px;
+  background: var(--navbar);
+  color: var(--navbar-ink);
+  padding-top: env(safe-area-inset-top);
+}
+.brand {
+  margin: 0;
+  flex: none;
+  display: flex;
+  background: var(--logo);
+  font-size: 1.25rem;
+  font-weight: 300;
+}
+.brand a {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  padding: 0 15px;
+  color: var(--navbar-ink);
+  white-space: nowrap;
 }
-.topbar h1 {
-  font-size: 1.25rem;
-  margin: 0;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+.brand b {
+  font-weight: 700;
 }
 .dev-badge {
+  align-self: center;
+  margin-left: 0.6rem;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  background: #eda100;
-  color: #141b2d;
-  border-radius: 6px;
-  padding: 0.1rem 0.4rem;
+  background: var(--warning);
+  color: #fff;
+  border-radius: 0.25em;
+  padding: 0.15em 0.5em;
   font-weight: 700;
 }
+.nav-links {
+  display: flex;
+  margin-left: auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav-links::-webkit-scrollbar {
+  display: none;
+}
+.nav-links a {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--navbar-ink);
+  white-space: nowrap;
+  font-size: 0.95rem;
+}
+.nav-links a:hover,
+.nav-links a:focus-visible {
+  background: rgb(0 0 0 / 10%);
+}
+@media (max-width: 480px) {
+  .brand {
+    font-size: 1.1rem;
+  }
+  .brand a {
+    padding: 0 12px;
+  }
+  .nav-links a {
+    padding: 0 10px;
+    font-size: 0.9rem;
+  }
+}
+@media (max-width: 400px) {
+  .brand {
+    font-size: 1rem;
+  }
+  .brand a {
+    padding: 0 10px;
+  }
+  .dev-badge {
+    margin-left: 0.4rem;
+  }
+  .nav-links a {
+    padding: 0 8px;
+    font-size: 0.85rem;
+  }
+}
+.nav-links a[target="_blank"]::after {
+  content: "↗";
+  margin-left: 0.3em;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+
+/* The report tabs: AdminLTE's "nav-tabs-custom", a white strip whose active tab is marked
+   with a blue top border. */
 .tabs {
   display: flex;
-  gap: 1.25rem;
-  margin-top: 0.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0 0.75rem 0 max(0.75rem, calc((100% - var(--page-max)) / 2 + 0.75rem));
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .tab {
   background: none;
   border: 0;
-  padding: 0.5rem 0 0.6rem;
-  color: rgb(255 255 255 / 65%);
-  border-bottom: 2px solid transparent;
+  border-top: 3px solid transparent;
+  padding: 0.55rem 0.9rem 0.6rem;
+  color: var(--text-3);
   cursor: pointer;
-  font-weight: 550;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--text);
 }
 .tab.active {
-  color: #fff;
-  border-bottom-color: #fff;
+  color: var(--text);
+  border-top-color: var(--accent);
+  font-weight: 600;
 }
 
-/* --- Date range ------------------------------------------------------------------------- */
+/* --- Date range: a Bootstrap button group ---------------------------------------------- */
 
 .range-bar {
   display: flex;
-  gap: 0.4rem;
   overflow-x: auto;
-  padding: 0.75rem 1rem 0.25rem;
+  padding: 0.75rem 0.75rem 0.25rem;
   scrollbar-width: none;
 }
 .range-bar::-webkit-scrollbar {
@@ -145,85 +264,119 @@ button {
 .chip {
   flex: none;
   border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 999px;
-  padding: 0.38rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 550;
+  background: var(--btn);
+  color: var(--btn-ink);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.9rem;
   cursor: pointer;
   white-space: nowrap;
 }
+.chip:hover {
+  background: var(--hover);
+  filter: brightness(0.97);
+}
 .chip.selected {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: var(--accent-ink);
+  filter: none;
+}
+.range-bar .chip {
+  border-radius: 0;
+  margin-left: -1px;
+}
+.range-bar .chip:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+  margin-left: 0;
+}
+.range-bar .chip:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.range-bar .chip.selected {
+  position: relative;
 }
 .custom-range {
   display: flex;
   gap: 0.75rem;
-  padding: 0.5rem 1rem 0;
+  padding: 0.5rem 0.75rem 0;
 }
 .custom-range label {
   display: flex;
   flex-direction: column;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
   color: var(--text-2);
   gap: 0.2rem;
   flex: 1;
 }
 .custom-range input {
   font: inherit;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  font-weight: 400;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #d2d6de;
+  border-radius: 0;
   background: var(--surface);
   color: var(--text);
 }
+@media (prefers-color-scheme: dark) {
+  .custom-range input {
+    border-color: var(--border);
+  }
+}
 
-/* --- Chart card ------------------------------------------------------------------------- */
+/* --- Boxes ------------------------------------------------------------------------------- */
 
-.card {
+.card,
+.txns {
   background: var(--surface);
   border-radius: var(--radius);
+  border-top: 3px solid var(--accent);
   box-shadow: var(--shadow);
   margin: 0.75rem 0.75rem 0;
-  padding: 0.85rem 0.75rem 0.5rem;
-  border: 1px solid var(--border);
+}
+.card {
+  padding: 0 0 0.25rem;
 }
 .card-head {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  padding: 0 0.25rem 0.25rem;
+  gap: 0.1rem;
+  padding: 0.6rem 0.75rem 0.55rem;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 0.5rem;
 }
 .range-label {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   color: var(--text-3);
 }
 .crumbs {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  font-size: 1.02rem;
-  font-weight: 600;
+  font-size: 1.2rem;
   min-height: 1.6rem;
 }
 .crumb {
   display: inline-flex;
   align-items: center;
 }
+.crumb-current {
+  color: var(--text);
+}
 .crumb-link {
   background: none;
   border: 0;
-  padding: 0.15rem 0;
-  color: var(--accent);
-  font-weight: 600;
+  padding: 0.1rem 0;
+  color: var(--link);
   cursor: pointer;
+}
+.crumb-link:hover {
+  text-decoration: underline;
 }
 .crumb-sep {
   color: var(--text-3);
-  margin: 0 0.35rem;
-  font-weight: 400;
+  margin: 0 0.4rem;
 }
 .chart {
   width: 100%;
@@ -248,23 +401,25 @@ button {
   gap: 0.6rem;
   background: none;
   border: 0;
-  border-top: 1px solid var(--border);
-  padding: 0.62rem 0.25rem;
+  border-top: 1px solid var(--border-soft);
+  padding: 0.55rem 0.75rem;
   text-align: left;
   cursor: pointer;
-  font-size: 0.93rem;
 }
 .ranked li:first-child .ranked-row {
   border-top: 0;
 }
+.ranked-row:hover {
+  background: var(--hover);
+}
 .ranked-row.selected {
   background: var(--accent-soft);
-  border-radius: 8px;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .swatch {
   width: 0.75rem;
   height: 0.75rem;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 .ranked-label {
   overflow: hidden;
@@ -273,13 +428,13 @@ button {
 }
 .ranked-value {
   font-variant-numeric: tabular-nums;
-  font-weight: 550;
+  font-weight: 600;
 }
 .ranked-share {
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
   text-align: right;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
 }
 .chev {
   color: var(--text-3);
@@ -287,10 +442,12 @@ button {
 .btn-quiet {
   background: none;
   border: 0;
-  color: var(--accent);
-  font-weight: 550;
+  color: var(--link);
   padding: 0.6rem;
   cursor: pointer;
+}
+.btn-quiet:hover {
+  text-decoration: underline;
 }
 .show-all {
   display: block;
@@ -300,35 +457,35 @@ button {
 /* --- Transactions ------------------------------------------------------------------------ */
 
 .txns {
-  margin: 1rem 0.75rem 0;
+  margin-top: 1rem;
+  overflow: hidden;
 }
 .section-title {
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-2);
-  margin: 0 0.25rem 0.4rem;
-  font-weight: 650;
+  font-size: 1.2rem;
+  font-weight: 400;
+  color: var(--text);
+  margin: 0;
+  padding: 0.6rem 0.75rem 0.55rem;
+  border-bottom: 1px solid var(--border-soft);
 }
 .txn-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  background: var(--surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  overflow: hidden;
 }
 .txn-date {
-  font-size: 0.76rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 700;
   color: var(--text-3);
-  padding: 0.6rem 0.9rem 0.1rem;
-  background: var(--surface);
+  padding: 0.35rem 0.75rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.txn-list li + li:not(.with-date) .txn {
+  border-top: 1px solid var(--border-soft);
 }
 .txn-list li.with-date:not(:first-child) {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
 }
 .txn {
   width: 100%;
@@ -338,11 +495,14 @@ button {
   gap: 0.75rem;
   background: none;
   border: 0;
-  padding: 0.55rem 0.9rem;
+  padding: 0.5rem 0.75rem;
   min-height: 3.25rem;
   text-align: left;
   cursor: pointer;
   transition: background-color 0.6s;
+}
+.txn:hover {
+  background: var(--hover);
 }
 .txn:active {
   background: var(--surface-2);
@@ -355,10 +515,10 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 .txn-merchant {
-  font-weight: 560;
+  color: var(--link);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -367,8 +527,8 @@ button {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.82rem;
-  color: var(--text-2);
+  font-size: 0.85rem;
+  color: var(--text-3);
   min-width: 0;
 }
 .txn-cat {
@@ -376,46 +536,55 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Bootstrap labels. */
 .prov {
   flex: none;
-  font-size: 0.68rem;
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-radius: 5px;
-  padding: 0.05rem 0.32rem;
-  border: 1px solid var(--border);
-  color: var(--text-2);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 0.25em;
+  padding: 0.25em 0.55em 0.3em;
+  background: var(--label-default);
+  color: var(--label-default-ink);
 }
 .prov-you {
-  background: var(--accent-soft);
-  border-color: transparent;
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.prov-rule {
+  background: var(--info);
+  color: #fff;
 }
 .prov-pending {
-  border-style: dashed;
+  background: var(--warning);
+  color: #fff;
 }
 .txn-amount {
   flex: none;
   font-variant-numeric: tabular-nums;
-  font-weight: 560;
 }
-.txn-amount.inflow,
-.sheet-amount.inflow {
+.outflow {
+  color: var(--outflow);
+}
+.inflow {
   color: var(--inflow);
+}
+.transfer {
+  color: var(--transfer);
 }
 .load-more {
   display: flex;
   justify-content: center;
   padding: 0.5rem;
+  border-top: 1px solid var(--border-soft);
 }
 
-/* --- Bottom sheet ------------------------------------------------------------------------ */
+/* --- Recategorize sheet: a bottom sheet on phones, a Bootstrap modal on wide screens ----- */
 
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(10 12 20 / 45%);
+  background: rgb(0 0 0 / 50%);
   z-index: 20;
   display: flex;
   align-items: flex-end;
@@ -425,21 +594,22 @@ button {
 .sheet {
   background: var(--surface);
   width: 100%;
-  max-width: 560px;
+  max-width: 600px;
   max-height: 88vh;
-  border-radius: 18px 18px 0 0;
+  border-radius: 6px 6px 0 0;
   display: flex;
   flex-direction: column;
   outline: none;
   animation: rise 0.2s ease-out;
   padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 5px 15px rgb(0 0 0 / 50%);
 }
 @media (min-width: 720px) {
   .sheet-backdrop {
     align-items: center;
   }
   .sheet {
-    border-radius: 18px;
+    border-radius: 6px;
     max-height: 80vh;
   }
 }
@@ -464,7 +634,7 @@ button {
 .sheet-header {
   position: relative;
   padding: 0.5rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
 }
 .sheet-title-row {
   display: flex;
@@ -475,31 +645,32 @@ button {
 }
 .sheet-header h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.3rem;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .sheet-amount {
-  font-weight: 650;
+  font-size: 1.1rem;
   font-variant-numeric: tabular-nums;
   flex: none;
 }
 .sheet-sub {
   margin: 0.15rem 0 0;
-  font-size: 0.85rem;
-  color: var(--text-2);
+  font-size: 0.88rem;
+  color: var(--text-3);
 }
 .sheet-raw {
   margin: 0.35rem 0 0;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.74rem;
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 0.76rem;
   color: var(--text-3);
   overflow-wrap: anywhere;
 }
 .sheet-now {
   margin: 0.4rem 0 0;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
 }
 .sheet-close {
   position: absolute;
@@ -508,10 +679,15 @@ button {
   border: 0;
   background: none;
   font-size: 1.6rem;
+  font-weight: 700;
   line-height: 1;
-  color: var(--text-3);
+  color: var(--text);
+  opacity: 0.25;
   padding: 0.3rem 0.5rem;
   cursor: pointer;
+}
+.sheet-close:hover {
+  opacity: 0.5;
 }
 .sheet-body {
   overflow-y: auto;
@@ -520,9 +696,8 @@ button {
   overscroll-behavior: contain;
 }
 .sheet-section {
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+  font-weight: 700;
   color: var(--text-2);
   margin: 0.75rem 0 0.4rem;
 }
@@ -535,30 +710,38 @@ button {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  border-radius: 10px;
-  padding: 0.4rem 0.7rem;
+  padding: 0.35rem 0.7rem;
   line-height: 1.2;
 }
 .chip-parent {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--text-3);
 }
 .chip.selected .chip-parent {
   color: inherit;
-  opacity: 0.75;
+  opacity: 0.8;
 }
 .search {
   width: 100%;
   margin: 0.85rem 0 0.4rem;
   font: inherit;
-  padding: 0.6rem 0.8rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  padding: 0.45rem 0.75rem;
+  border-radius: 0;
+  border: 1px solid #d2d6de;
+  background: var(--surface);
   color: var(--text);
 }
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+@media (prefers-color-scheme: dark) {
+  .search {
+    border-color: var(--border);
+  }
+}
 .tree-group {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   padding: 0.2rem 0;
 }
 .tree-group:first-child {
@@ -572,11 +755,14 @@ button {
   gap: 0.5rem;
   border: 0;
   background: none;
-  padding: 0.55rem 0.5rem;
+  padding: 0.5rem 0.5rem;
   text-align: left;
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-weight: 600;
+}
+.cat-option:hover {
+  background: var(--hover);
 }
 .cat-option.sub {
   font-weight: 400;
@@ -588,35 +774,37 @@ button {
 }
 .cat-current {
   font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-3);
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 0.25em;
+  padding: 0.25em 0.55em 0.3em;
+  background: var(--label-default);
+  color: var(--label-default-ink);
 }
 .cat-parent {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 400;
   color: var(--text-3);
 }
-.cat-option.selected .cat-current,
 .cat-option.selected .cat-parent {
   color: inherit;
   opacity: 0.85;
 }
 .sheet-footer {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   padding: 0.7rem 1rem 0.9rem;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   background: var(--surface);
+  border-radius: 0 0 6px 6px;
 }
 .toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.9rem;
+  font-size: 0.93rem;
   cursor: pointer;
 }
 .switch {
@@ -625,7 +813,7 @@ button {
   width: 2.9rem;
   height: 1.7rem;
   border-radius: 999px;
-  background: var(--border);
+  background: var(--label-default);
   position: relative;
   cursor: pointer;
   transition: background 0.15s;
@@ -649,11 +837,13 @@ button {
 .switch:checked::after {
   transform: translateX(1.2rem);
 }
+/* AdminLTE's "callout callout-info". */
 .rule-preview {
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   background: var(--surface-2);
-  border-radius: 10px;
-  padding: 0.55rem 0.7rem;
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
 }
 .check-row {
   display: flex;
@@ -662,40 +852,41 @@ button {
   cursor: pointer;
 }
 .check-row input {
-  margin-top: 0.15rem;
+  margin-top: 0.2rem;
   width: 1.05rem;
   height: 1.05rem;
   accent-color: var(--accent);
 }
 .btn-primary {
-  border: 0;
-  border-radius: 12px;
+  border: 1px solid var(--accent-dark);
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-ink);
-  padding: 0.8rem 1rem;
-  font-weight: 650;
+  padding: 0.6rem 1rem;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
 .btn-primary:disabled {
-  background: var(--border);
-  color: var(--text-3);
-  cursor: default;
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 /* --- Wide screens: chart beside the transactions ----------------------------------------- */
 
 .chart-card {
-  scroll-margin-top: 6rem;
+  scroll-margin-top: 6.5rem;
 }
 @media (min-width: 1000px) {
-  .app {
-    max-width: 1200px;
+  :root {
+    --page-max: 1200px;
   }
-  .topbar {
-    border-radius: 0 0 var(--radius) var(--radius);
+  .brand {
+    width: 230px;
   }
   .content {
     display: grid;
@@ -706,9 +897,9 @@ button {
   }
   .content .chart-card {
     position: sticky;
-    top: 6.5rem;
+    top: 7rem;
     margin: 0.75rem 0 0;
-    max-height: calc(100vh - 7.5rem);
+    max-height: calc(100vh - 8rem);
     overflow-y: auto;
   }
   .content .txns {
@@ -722,18 +913,19 @@ button {
   }
 }
 
-/* --- Toast ------------------------------------------------------------------------------- */
+/* --- Toast: Bootstrap alerts ------------------------------------------------------------- */
 
 .toast {
   position: fixed;
   left: 50%;
   bottom: calc(1rem + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  background: var(--topbar);
+  background: #00a65a;
+  border: 1px solid #008d4c;
   color: #fff;
   padding: 0.7rem 1rem;
-  border-radius: 12px;
-  font-size: 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.93rem;
   width: max-content;
   max-width: calc(100% - 2rem);
   box-shadow: 0 6px 24px rgb(0 0 0 / 25%);
@@ -741,5 +933,6 @@ button {
   animation: rise 0.2s ease-out;
 }
 .toast.error {
-  background: var(--error);
+  background: #dd4b39;
+  border-color: #d73925;
 }

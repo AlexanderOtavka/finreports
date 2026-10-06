@@ -89,10 +89,18 @@ export interface RuleDto {
   updatedAt: string;
 }
 
+/** A link to another app, shown in the top bar (`NAV_LINKS`). */
+export interface NavLink {
+  label: string;
+  url: string;
+  newTab?: boolean;
+}
+
 export interface SessionDto {
   email: string;
   csrfToken: string;
   devBypass: boolean;
+  navLinks: NavLink[];
 }
 
 export interface SuggestionsDto {
