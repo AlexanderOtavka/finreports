@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  # The weekly update dispatches this on its branch (a PR opened with GITHUB_TOKEN gets no
+  # pull_request run), and on main after merging it (nor does that push get a push run).
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  IMAGE_NAME: ghcr.io/alexanderotavka/finreports
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Builds the package and the image, typechecks, runs the unit tests against a
+      # throwaway PostgreSQL, and drives the UI with headless Chromium.
+      - name: nix flake check
+        run: nix flake check -L
+
+      - name: Collect smoke-test screenshots
+        if: always()
+        run: nix build .#checks.x86_64-linux.smoke --out-link smoke-output || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-screenshots
+          path: smoke-output/
+          if-no-files-found: ignore
+
+  container:
+    needs: check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build and load the image
+        run: |
+          nix build .#container --out-link container.tar.gz
+          docker load < container.tar.gz
+
+      - name: Check the image runs as uid 1000 with a read-only root
+        env:
+          IMAGE: finreports:latest
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "1000:1000"
+          # Without login settings the service refuses to start, and says why.
+          out="$(docker run --rm --read-only --tmpfs /tmp -e BACKEND=sample "$IMAGE" 2>&1 || true)"
+          grep -q "OAUTH_CLIENT_ID" <<<"$out"
+          # With them, it migrates, syncs the sample data, and answers its health check.
+          docker run -d --name app --network host --read-only --tmpfs /tmp \
+            -e BACKEND=sample -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+            -e PUBLIC_ORIGIN=https://firefly.example.com \
+            -e OAUTH_CLIENT_ID=1 -e OAUTH_CLIENT_SECRET=x -e ALLOWED_EMAILS=owner@example.com "$IMAGE"
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8080/reports/-/healthz && break
+            sleep 1
+          done
+          curl -sf http://localhost:8080/reports/-/healthz
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: firefly.example.com' http://localhost:8080/reports/api/session)" = 401
+          docker logs app
+          docker rm -f app
+
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish sha-<commit> and latest
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          for tag in "sha-${GITHUB_SHA}" latest; do
+            docker tag finreports:latest "${IMAGE_NAME}:${tag}"
+            docker push "${IMAGE_NAME}:${tag}"
+          done
+          echo "Published \`${IMAGE_NAME}@$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_NAME}:sha-${GITHUB_SHA}" | cut -d@ -f2)\`" >> "$GITHUB_STEP_SUMMARY"
+    permissions:
+      contents: read
+      packages: write
+
+  # Merges the weekly update once everything above passed on its branch.
+  automerge:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/automated/update-deps'
+    needs: [check, container]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge the update PR, then build and publish main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr="$(gh pr list --head automated/update-deps --state open --json number,headRefOid \
+            --jq ".[] | select(.headRefOid == \"${GITHUB_SHA}\") | .number")"
+          if [ -z "$pr" ]; then
+            echo "No open update PR at ${GITHUB_SHA}; nothing to merge."
+            exit 0
+          fi
+          gh pr merge "$pr" --squash --delete-branch
+          gh workflow run ci.yml --ref main
