@@ -111,8 +111,12 @@ a {
 .app {
   padding-bottom: calc(2rem + env(safe-area-inset-bottom));
 }
+/* One column up to tablets in portrait, two from 1000px; the tabs line up with it. */
+:root {
+  --page-max: 960px;
+}
 .page {
-  max-width: 720px;
+  max-width: var(--page-max);
   margin: 0 auto;
 }
 
@@ -196,6 +200,21 @@ a {
     font-size: 0.9rem;
   }
 }
+@media (max-width: 400px) {
+  .brand {
+    font-size: 1rem;
+  }
+  .brand a {
+    padding: 0 10px;
+  }
+  .dev-badge {
+    margin-left: 0.4rem;
+  }
+  .nav-links a {
+    padding: 0 8px;
+    font-size: 0.85rem;
+  }
+}
 .nav-links a[target="_blank"]::after {
   content: "↗";
   margin-left: 0.3em;
@@ -209,7 +228,7 @@ a {
   display: flex;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
-  padding: 0 0.5rem;
+  padding: 0 0.75rem 0 max(0.75rem, calc((100% - var(--page-max)) / 2 + 0.75rem));
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -863,15 +882,11 @@ a {
   scroll-margin-top: 6.5rem;
 }
 @media (min-width: 1000px) {
-  .page {
-    max-width: 1200px;
+  :root {
+    --page-max: 1200px;
   }
   .brand {
     width: 230px;
-  }
-  /* Line the tabs up with the boxes below. */
-  .tabs {
-    padding-left: max(0.5rem, calc((100% - 1200px) / 2 + 0.75rem));
   }
   .content {
     display: grid;
