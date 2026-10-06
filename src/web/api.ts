@@ -71,6 +71,7 @@ export const api = {
     return s;
   },
   categories: () => request<CategoryDto[]>("GET", "/categories"),
+  categoryOrder: () => request<string[]>("GET", "/category-order"),
   report: (q: ReportQuery, signal?: AbortSignal) =>
     request<ReportData>("GET", `/reports/${encodeURIComponent(q.reportId)}/data?${qs(q)}`, undefined, signal),
   transactions: (q: ReportQuery, cursor: string | null, signal?: AbortSignal, limit = 60) =>

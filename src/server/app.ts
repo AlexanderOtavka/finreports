@@ -138,6 +138,16 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
 
   app.get(`${BASE}/api/categories`, async () => listCategories(db));
 
+  // Top-level categories by all-time spending, biggest first: the order the web app hands out
+  // category hues in, so a category keeps its color in every chart and date range.
+  app.get(`${BASE}/api/category-order`, async (): Promise<string[]> => {
+    const res = await db.query<{ top_id: string }>(
+      `SELECT t.top_id FROM report_txn t WHERE t.spend <> 0
+       GROUP BY t.top_id HAVING sum(t.spend) > 0 ORDER BY sum(t.spend) DESC, t.top_id`,
+    );
+    return res.rows.map((r) => r.top_id);
+  });
+
   app.post(`${BASE}/api/categories`, async (req, reply) => {
     const body = parse(categoryBody, req.body);
     return reply.code(201).send(await createCategory(db, body));

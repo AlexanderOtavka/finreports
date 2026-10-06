@@ -58,9 +58,10 @@ interface Toast {
 export function App() {
   const [session, setSession] = useState<SessionDto | null>(null);
   const [categories, setCategories] = useState<CategoryTree | null>(null);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(readUrl);
-  const [data, setData] = useState<ReportData | null>(null);
+  const [loaded, setData] = useState<ReportData | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [txns, setTxns] = useState<TxnDto[]>([]);
   const [txnTotal, setTxnTotal] = useState(0);
@@ -76,10 +77,13 @@ export function App() {
   const colors = useRef(new ColorMemory());
 
   const report = findReport(view.reportId) ?? REPORTS[0]!;
+  // Until the new report loads, the last one's data does not fit this report's chart and list.
+  const data = loaded?.reportId === report.id ? loaded : null;
 
   useEffect(() => {
-    Promise.all([api.session(), api.categories()])
-      .then(([s, c]) => {
+    Promise.all([api.session(), api.categories(), api.categoryOrder()])
+      .then(([s, c, order]) => {
+        setCategoryOrder(order);
         setSession(s);
         setCategories(new CategoryTree(c));
       })
@@ -174,6 +178,11 @@ export function App() {
         if (key === OTHER_KEY) setShowAllRows(true);
         return;
       }
+      if (report.link) {
+        navigate(report.link(key, view));
+        window.scrollTo({ top: 0 });
+        return;
+      }
       const base = view.path.slice(0, data.level);
       if (!data.canDrill && view.path[data.level] === key) {
         navigate({ ...view, path: base }); // tap the selected slice again: clear the selection
@@ -182,15 +191,12 @@ export function App() {
       }
       revealChart();
     },
-    [data, view, navigate],
+    [data, view, navigate, report],
   );
 
   // Colors stick to their keys while the view (report, level, path, range) stays put.
   const viewId = `${report.id}:${level}:${view.path.slice(0, level).join("/")}:${view.from}:${view.to}`;
-  const theme = useMemo(
-    () => chartTheme(dark, (key, index) => colors.current.colorFor(viewId, key, index, dark)),
-    [dark, viewId],
-  );
+  const theme = useMemo(() => chartTheme(dark, viewId, colors.current, categoryOrder), [dark, viewId, categoryOrder]);
   const option = useMemo(() => (data ? report.chart(data, theme, selectedKey) : null), [data, report, theme, selectedKey]);
 
   // --- Recategorizing --------------------------------------------------------------------
@@ -254,7 +260,7 @@ export function App() {
   }
 
   const preset = matchPreset(view.from, view.to);
-  const rows = data?.rows ?? [];
+  const rows = data ? (report.listRows ? report.listRows(data) : data.rows) : [];
   const total = data?.total ?? 0;
   const visibleRows = showAllRows ? rows : rows.slice(0, COLLAPSED_ROWS);
 
@@ -377,10 +383,10 @@ export function App() {
           <span className="range-label">{formatRange(view.from, view.to)}</span>
         </div>
 
-        {option && rows.length > 0 ? (
+        {option && data && data.rows.length > 0 ? (
           <Chart
             option={option}
-            height={report.id === "monthly-trend" && level > 0 ? Math.max(220, rows.length * 30 + 30) : 280}
+            height={280}
             onSelect={onSelect}
             label={`${report.title}: ${data?.breadcrumbs.map((b) => b.label).join(" › ")}`}
             view={viewId}
@@ -407,7 +413,7 @@ export function App() {
                       <span className="ranked-label">{report.rowLabel ? report.rowLabel(r) : r.label}</span>
                       <span className="ranked-value">{formatMoneyShort(r.value)}</span>
                       <span className="ranked-share">{share}%</span>
-                      {data?.canDrill && <span className="chev" aria-hidden="true">›</span>}
+                      {(data?.canDrill || report.link) && <span className="chev" aria-hidden="true">›</span>}
                     </button>
                   </li>
                 );

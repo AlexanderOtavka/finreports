@@ -9,9 +9,17 @@ today, behind a backend interface small enough to swap for another ledger.
 Plaid / SimpleFIN / …  →  Firefly (ledger)  ⇄  backend adapter  ⇄  finreports + PostgreSQL  →  PWA at /reports/
 ```
 
-Tap a slice of the spending donut to drill into its subcategories. The transactions behind
-the selection scroll below the chart. Tap one to recategorize it, or to "always categorize"
-that merchant: a rule, previewed against past transactions and optionally applied to them.
+Tap a slice of the spending donut to drill into its subcategories, then a subcategory for its
+merchants. The monthly report stacks each month's bar by category; tap a month to open the
+donut for just that month. The transactions behind the selection scroll below the chart. Tap
+one to recategorize it, or to "always categorize" that merchant: a rule, previewed against
+past transactions and optionally applied to them.
+
+A category keeps its color in every chart, range and drill level: the eight biggest
+top-level categories of all time take the eight palette hues, in order (the smaller ones are
+gray and fold into "Other"). Subcategories and merchants are shades of their category's hue.
+The biggest one wears the hue itself, and the rest alternate lighter and darker so that
+neighboring slices stand apart.
 
 ## Quick start
 
@@ -107,13 +115,21 @@ Reports are code: one file per report in `src/reports/`.
      condition for the transactions behind `key`; bind values with `p(value)`, never by
      pasting them into SQL.
    - `chart(data, theme, selectedKey)`: an ECharts option. Give each datum a `key`, so a tap
-     drills (or, on the last level, selects). Use `theme.colorFor(key, index)` for colors.
+     drills (or, on the last level, selects). On a column chart, give the category axis
+     entries a `key` instead (`{ value: "Sep", key: "2026-09" }`) and a tap anywhere in the
+     column counts. Colors: `theme.categoryColor(topId)` for top-level categories (null for
+     the small ones: use `theme.other`), `theme.shadeOf(base, key, index)` for rows inside
+     one, and `theme.colorFor(key, index)` for anything else. Return the same color from
+     `rowColor` so the list under the chart matches.
+   - Optional: `link(key, ctx)` makes a tap open another report, range and drill path instead
+     of drilling. `listRows(data)` lists other rows under the chart (a stacked chart lists its
+     series, as its legend).
 3. Add it to `REPORTS` in `src/reports/index.ts`.
 
 `report_txn` has `id, date, amount` (signed, negative is money out), `spend` (money out as a
 positive number, refunds negative, zero for transfers and income), `type, pending, merchant,
 description, account_name, category_id, provenance, top_id, top_name, leaf_id, leaf_name,
-kind`. The breadcrumb, the transaction list under the chart, and the recategorize sheet come
+kind, merchant_key`. The breadcrumb, the transaction list under the chart, and the recategorize sheet come
 with every report; nothing else needs touching.
 
 ## Configuration

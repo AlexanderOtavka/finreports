@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import monthlyTrend from "../src/reports/monthly-trend.js";
 import { SampleAdapter } from "../src/server/adapters/sample.js";
 import { buildApp } from "../src/server/app.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
@@ -73,8 +74,30 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(food.total).toBeCloseTo(top.rows.find((r) => r.key === "food-and-drink")!.value, 2);
 
     const groceries = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&path=food-and-drink/food-and-drink.groceries`);
-    expect(groceries.level).toBe(1);
+    expect(groceries.level).toBe(2);
+    expect(groceries.canDrill).toBe(false);
     expect(groceries.breadcrumbs.map((b) => b.label)).toEqual(["All spending", "Food and Drink", "Groceries"]);
+    // The last level groups by merchant key, named by the backend's merchant name.
+    expect(groceries.rows.length).toBeGreaterThan(1);
+    expect(groceries.total).toBeCloseTo(food.rows.find((r) => r.key === "food-and-drink.groceries")!.value, 2);
+    const merchant = groceries.rows[0]!;
+    const picked = await get<ReportData>(
+      `/reports/api/reports/spending-by-category/data?${RANGE}&path=food-and-drink/food-and-drink.groceries/${encodeURIComponent(merchant.key)}`,
+    );
+    expect(picked.level).toBe(2);
+    expect(picked.breadcrumbs.at(-1)!.label).toBe(merchant.label);
+    const txns = await get<TxnPage>(
+      `/reports/api/reports/spending-by-category/transactions?${RANGE}&path=food-and-drink/food-and-drink.groceries/${encodeURIComponent(merchant.key)}&limit=200`,
+    );
+    expect(txns.items.length).toBeGreaterThan(0);
+    expect(txns.items.every((t) => t.merchantKey === merchant.key && t.categoryId === "food-and-drink.groceries")).toBe(true);
+  });
+
+  it("orders categories by all-time spending, for their colors", async () => {
+    const order = await get<string[]>("/reports/api/category-order");
+    expect(order[0]).toBe("rent-and-utilities");
+    expect(order).not.toContain("income");
+    expect(new Set(order).size).toBe(order.length);
   });
 
   it("lists the transactions behind a selection, paginated", async () => {
@@ -91,9 +114,23 @@ describe("API (sample backend, dev auth bypass)", async () => {
 
   it("runs the monthly trend report", async () => {
     const months = await get<ReportData>(`/reports/api/reports/monthly-trend/data?${RANGE}`);
-    expect(months.rows).toHaveLength(12);
-    const sept = await get<ReportData>(`/reports/api/reports/monthly-trend/data?${RANGE}&path=2026-09`);
-    expect(sept.breadcrumbs.at(-1)!.label).toBe("Sep 2026");
+    expect(months.levels).toBe(1);
+    // One row per month and category, for the stacked bars.
+    expect(new Set(months.rows.map((r) => r.key)).size).toBe(12);
+    const sept = months.rows.filter((r) => r.key === "2026-09");
+    expect(sept.length).toBeGreaterThan(3);
+    expect(sept.every((r) => typeof r.top_id === "string" && r.label === "Sep 2026")).toBe(true);
+    // A month's bar adds up to the category report for that month.
+    const cats = await get<ReportData>("/reports/api/reports/spending-by-category/data?from=2026-09-01&to=2026-09-30");
+    expect(sept.reduce((sum, r) => sum + r.value, 0)).toBeCloseTo(cats.total, 2);
+  });
+
+  it("links a month to the category report for that month, clipped to the range", () => {
+    const ctx = { from: "2025-10-15", to: "2026-09-20", path: [] };
+    expect(monthlyTrend.link!("2026-02", ctx)).toEqual({ reportId: "spending-by-category", from: "2026-02-01", to: "2026-02-28", path: [] });
+    expect(monthlyTrend.link!("2025-10", ctx)).toMatchObject({ from: "2025-10-15", to: "2025-10-31" });
+    expect(monthlyTrend.link!("2026-09", ctx)).toMatchObject({ from: "2026-09-01", to: "2026-09-20" });
+    expect(monthlyTrend.link!("food-and-drink", ctx)).toEqual({ reportId: "spending-by-category", from: ctx.from, to: ctx.to, path: ["food-and-drink"] });
   });
 
   it("requires a CSRF token for writes", async () => {
