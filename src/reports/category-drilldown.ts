@@ -1,18 +1,30 @@
-import type { ReportDefinition } from "./types.js";
+import type { ReportData, ReportRow } from "../shared/api.js";
+import type { ChartTheme, ReportDefinition } from "./types.js";
 
 /**
  * Spending by category: a donut of top-level categories; tap a slice for its subcategories,
- * tap a subcategory to narrow the transaction list to it.
+ * tap a subcategory for its merchants, tap a merchant to narrow the transaction list to it.
+ *
+ * Colors carry the category through the drill: a category has one hue everywhere (see
+ * `ChartTheme.categoryColor`), and its subcategories and merchants are shades of that hue.
  */
-const MAX_SLICES = 7;
 const OTHER_KEY = "__other__";
+
+/** The row's color, or null when the donut folds it into the "Other" slice. */
+function sliceColor(data: ReportData, row: ReportRow, index: number, theme: ChartTheme): string | null {
+  if (data.level === 0) return theme.categoryColor(row.key);
+  const top = data.breadcrumbs[1]?.key ?? "";
+  return theme.shadeOf(theme.categoryColor(top) ?? theme.neutral, row.key, index);
+}
+
+const CENTER_NOUN = ["spent", "in this category", "in this subcategory"];
 
 const report: ReportDefinition = {
   id: "spending-by-category",
   title: "Spending by category",
   shortTitle: "Categories",
   defaultRange: "3m",
-  description: "Where the money went, by category and subcategory. Refunds net against spending.",
+  description: "Where the money went, by category, subcategory and merchant. Refunds net against spending.",
   rootLabel: "All spending",
   baseFilter: "t.spend <> 0",
   levels: [
@@ -38,25 +50,42 @@ const report: ReportDefinition = {
         ORDER BY value DESC, label`,
       filter: (key, { p }) => `t.leaf_id = ${p(key)}`,
     },
+    {
+      // Merchants as rules see them (the merchant key); named by the backend's merchant name
+      // where it has one, else by the key.
+      name: "Merchant",
+      query: (where) => `
+        SELECT t.merchant_key AS key,
+               coalesce(mode() WITHIN GROUP (ORDER BY nullif(btrim(t.merchant), '')), initcap(t.merchant_key)) AS label,
+               sum(t.spend)::float8 AS value
+        FROM report_txn t
+        WHERE ${where}
+        GROUP BY t.merchant_key
+        HAVING sum(t.spend) > 0
+        ORDER BY value DESC, label`,
+      filter: (key, { p }) => `t.merchant_key = ${p(key)}`,
+    },
   ],
 
+  rowColor: (data, row, index, theme) => sliceColor(data, row, index, theme) ?? theme.other,
+
   chart(data, theme, selectedKey) {
-    // A donut stays readable with a handful of slices; the rest fold into one "Other"
-    // slice. The ranked list under the chart still shows (and drills into) every row.
-    const shown = data.rows.slice(0, MAX_SLICES);
-    const rest = data.rows.slice(MAX_SLICES);
-    const slices = shown.map((row, i) => ({
-      name: row.label,
-      value: row.value,
-      key: row.key,
-      itemStyle: { color: theme.colorFor(row.key, i) },
-    }));
-    if (rest.length > 0) {
+    // A donut stays readable with a handful of slices: rows without a color of their own (small
+    // categories, or past the seventh shade) fold into one "Other" slice. The ranked list under
+    // the chart still shows (and drills into) every row.
+    const slices: Array<{ name: string; value: number; key: string; itemStyle: { color: string } }> = [];
+    const folded: ReportRow[] = [];
+    data.rows.forEach((row, i) => {
+      const color = sliceColor(data, row, i, theme);
+      if (color) slices.push({ name: row.label, value: row.value, key: row.key, itemStyle: { color } });
+      else folded.push(row);
+    });
+    if (folded.length > 0) {
       slices.push({
-        name: `${rest.length} more`,
-        value: rest.reduce((sum, row) => sum + row.value, 0),
+        name: folded.length === 1 ? folded[0]!.label : `${folded.length} more`,
+        value: folded.reduce((sum, row) => sum + row.value, 0),
         key: OTHER_KEY,
-        itemStyle: { color: theme.dark ? "#5c5b56" : "#b9b8b2" },
+        itemStyle: { color: theme.other },
       });
     }
     const selectedLabel = data.rows.find((r) => r.key === selectedKey)?.label;
@@ -74,7 +103,7 @@ const report: ReportDefinition = {
       },
       title: {
         text: theme.formatMoney(selectedValue ?? data.total),
-        subtext: selectedLabel ?? (data.level === 0 ? "spent" : "in this category"),
+        subtext: selectedLabel ?? CENTER_NOUN[data.level] ?? "spent",
         left: "center",
         top: "center",
         textStyle: { color: theme.text, fontSize: 20, fontWeight: 600 },

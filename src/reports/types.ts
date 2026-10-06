@@ -43,9 +43,32 @@ export interface ChartTheme {
   textMuted: string;
   surface: string;
   grid: string;
+  /** The "everything else" color of folded rows. */
+  other: string;
+  /** A gray to shade from where a category has no hue of its own. */
+  neutral: string;
   /** Color for a row key, stable for the lifetime of the current view. */
   colorFor(key: string, index: number): string;
+  /**
+   * The fixed color of a top-level category, the same in every report, range and drill level;
+   * null for the small categories past the eighth hue (draw them as `other`).
+   */
+  categoryColor(topId: string): string | null;
+  /**
+   * A shade of `base` for the row `key` ranked `index`, stable for the lifetime of the
+   * current view; slot 0 is `base` itself. Null for rows ranked past the seventh, which
+   * charts fold into one `other` mark.
+   */
+  shadeOf(base: string, key: string, index: number): string | null;
   formatMoney(value: number): string;
+}
+
+/** Where a tap takes the app: a report, a date range, and a drill path. */
+export interface ReportLink {
+  reportId: string;
+  from: string;
+  to: string;
+  path: string[];
 }
 
 export type RangePreset = "30d" | "3m" | "6m" | "12m" | "ytd";
@@ -64,6 +87,16 @@ export interface ReportDefinition {
   baseFilter: string;
   levels: DrillLevel[];
   chart(data: ReportData, theme: ChartTheme, selectedKey: string | null): EChartsOption;
+  /**
+   * Instead of drilling, a tap on `key` (in the chart or the ranked list) opens another view,
+   * e.g. a month of the monthly report opens the category report for that month.
+   */
+  link?(key: string, ctx: ReportContext): ReportLink;
+  /**
+   * The rows of the ranked list under the chart, when they are not the chart's rows (a stacked
+   * chart lists its series, as its legend). Defaults to `data.rows`.
+   */
+  listRows?(data: ReportData): ReportRow[];
   /** Row label shown in the ranked list under the chart. Defaults to `row.label`. */
   rowLabel?(row: ReportRow): string;
   /**

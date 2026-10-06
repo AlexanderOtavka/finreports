@@ -116,13 +116,16 @@ async function startServer(databaseUrl) {
 
 /**
  * Taps the donut slice for `key`. ECharts draws on a canvas, so this computes where the slice
- * is: slices run clockwise from 12 o'clock in row order, the first seven shown and the rest
- * folded into one, at radius 52%-82% of half the smaller side.
+ * is: slices run clockwise from 12 o'clock in row order, at radius 52%-82% of half the smaller
+ * side. Shown are the categories with a hue (the eight biggest of all time) or, further down,
+ * the first seven rows; the rest fold into one slice at the end.
  */
 async function tapSlice(page, base, query, key, touch) {
   const data = await (await page.request.get(`${base}/reports/api/reports/${query.reportId}/data?${new URLSearchParams(query.params)}`)).json();
-  const shown = data.rows.slice(0, 7);
-  const rest = data.rows.slice(7).reduce((s, r) => s + r.value, 0);
+  const hued = (await (await page.request.get(`${base}/reports/api/category-order`)).json()).slice(0, 8);
+  const isShown = (r, i) => (data.level === 0 ? hued.includes(r.key) : i < 7);
+  const shown = data.rows.filter(isShown);
+  const rest = data.rows.filter((r, i) => !isShown(r, i)).reduce((s, r) => s + r.value, 0);
   const total = shown.reduce((s, r) => s + r.value, 0) + rest;
   let start = 0;
   let mid = null;
@@ -133,7 +136,7 @@ async function tapSlice(page, base, query, key, touch) {
     }
     start += r.value;
   }
-  assert(mid !== null, `slice ${key} is one of the first seven`);
+  assert(mid !== null, `slice ${key} has a slice of its own`);
   const box = await page.getByTestId("chart").boundingBox();
   const radius = (Math.min(box.width, box.height) / 2) * 0.67;
   const angle = (mid / total) * 2 * Math.PI;
@@ -202,12 +205,13 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert((await crumbs()).includes("All spending"), "breadcrumb root");
     await shot("drill-transportation");
 
-    // 3. Tap the "Taxis and rideshare" slice: the list narrows to it, and shows the
-    //    Uber Eats orders Plaid filed as rides.
+    // 3. Tap the "Taxis and rideshare" slice: its merchants, and the list narrows to it and
+    //    shows the Uber Eats orders Plaid filed as rides.
     await tapSlice(page, server.base, { reportId: "spending-by-category", params: { ...r, path: "transportation" } }, "transportation.taxis-and-ride-shares", !!options.hasTouch);
     await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Taxis and rideshare"));
     const eats = page.locator("[data-testid=txn]", { hasText: "Uber Eats" }).first();
     await eats.waitFor();
+    await page.locator('[data-testid=ranked-row][data-key="uber eats"]').waitFor();
     const listCats = await page.locator("[data-testid=txn] .txn-cat").allInnerTexts();
     assert(listCats.length > 0 && listCats.every((c) => c === "Taxis and rideshare"), `list filtered to the subcategory (${[...new Set(listCats)]})`);
     const taxisBefore = await (await page.request.get(`${server.base}/reports/api/reports/spending-by-category/data?${new URLSearchParams({ ...r, path: "transportation" })}`)).json();
@@ -231,7 +235,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(await page.getByTestId("apply-past").isChecked(), "apply to past is on by default");
     await shot("rule-preview");
 
-    // 6. Save: the toast confirms, Uber Eats leaves the list, the slice shrinks.
+    // 6. Save: the toast confirms, Uber Eats leaves the list and the merchants, the slice shrinks.
     await page.getByTestId("save").click();
     await page.getByTestId("toast").waitFor();
     const toast = await page.getByTestId("toast").innerText();
@@ -240,9 +244,14 @@ async function runFlow(name, options, chromiumPath, pg) {
     const taxisAfter = await (await page.request.get(`${server.base}/reports/api/reports/spending-by-category/data?${new URLSearchParams({ ...r, path: "transportation" })}`)).json();
     const taxisValueAfter = taxisAfter.rows.find((x) => x.key === "transportation.taxis-and-ride-shares").value;
     assert(taxisValueAfter < taxisValueBefore - 100, `taxis shrank (${taxisValueBefore} → ${taxisValueAfter})`);
-    const shownValue = await page.locator('[data-testid=ranked-row][data-key="transportation.taxis-and-ride-shares"] .ranked-value').innerText();
-    assert(shownValue === `$${Math.round(taxisValueAfter).toLocaleString("en-US")}`, `ranked list shows the new total (${shownValue})`);
+    await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="uber eats"]'));
     await shot("after-save");
+    await page.getByTestId("breadcrumbs").getByRole("button", { name: "Transportation" }).click();
+    const shownValue = page.locator('[data-testid=ranked-row][data-key="transportation.taxis-and-ride-shares"] .ranked-value');
+    await page.waitForFunction(
+      (want) => document.querySelector('[data-testid=ranked-row][data-key="transportation.taxis-and-ride-shares"] .ranked-value')?.textContent === want,
+      `$${Math.round(taxisValueAfter).toLocaleString("en-US")}`,
+    ).catch(async () => assert(false, `ranked list shows the new total (${await shownValue.innerText()})`));
 
     // 7. Back up to the top level with the breadcrumb: Food and Drink grew.
     await page.getByTestId("breadcrumbs").getByRole("button", { name: "All spending" }).click();
@@ -266,16 +275,33 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(JSON.stringify(first.uiContext.drillPath) === JSON.stringify(["transportation", "transportation.taxis-and-ride-shares"]), "ui context drill path");
     assert(events[1].rule?.when?.merchant?.equals === "uber eats", "rule definition logged");
 
-    // 9. The other report: monthly bars, tap a month.
+    // 9. The other report: bars stacked by category, listed under the chart as its legend. A
+    //    tap in the last month's column, above its bar, opens the category donut for that month.
     await page.getByTestId("report-monthly-trend").click();
-    await page.getByTestId("ranked-row").first().waitFor();
+    await page.locator('[data-testid=ranked-row][data-key="rent-and-utilities"]').waitFor();
     await shot("monthly");
-    await page.getByTestId("ranked-row").last().click();
-    await page.waitForFunction(() => (document.querySelector("[data-testid=breadcrumbs]")?.textContent ?? "").includes("›"));
+    const bars = await page.getByTestId("chart").boundingBox();
+    await page.mouse.click(bars.x + bars.width - 26, bars.y + 30);
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
+    const month = await range();
+    assert(month.from.endsWith("-01") && month.from.slice(0, 7) === month.to.slice(0, 7), `opened one month (${month.from} – ${month.to})`);
+    await page.getByTestId("ranked-row").first().waitFor();
     await page.getByTestId("txn").first().waitFor();
-    await shot("monthly-drill");
+    await shot("monthly-to-month");
 
-    // 10. Dark mode renders too.
+    // 10. Drill to a merchant: category, subcategory, then the biggest merchant narrows the list.
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink"]').click();
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]').click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Restaurants"));
+    await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]'));
+    const top = page.getByTestId("ranked-row").first();
+    const merchantName = await top.locator(".ranked-label").innerText();
+    await top.click();
+    await page.locator("[data-testid=ranked-row].selected").waitFor();
+    await page.waitForFunction((m) => [...document.querySelectorAll("[data-testid=txn]")].every((el) => el.textContent?.includes(m)), merchantName);
+    await shot("merchant");
+
+    // 11. Dark mode renders too.
     await page.emulateMedia({ colorScheme: "dark" });
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();
