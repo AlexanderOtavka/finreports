@@ -53,6 +53,7 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, onL
           lastDate = t.date;
           const prov = provenanceLabel(t.provenance);
           const inflow = t.amount > 0;
+          const flow = t.type === "transfer" ? "transfer" : inflow ? "inflow" : "outflow";
           return (
             <li key={t.id} className={showDate ? "with-date" : undefined}>
               {showDate && <div className="txn-date">{formatDate(t.date)}</div>}
@@ -75,7 +76,7 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, onL
                     {t.pending && <span className="prov prov-pending">Pending</span>}
                   </span>
                 </span>
-                <span className={`txn-amount${inflow ? " inflow" : ""}`}>
+                <span className={`txn-amount ${flow}`}>
                   {inflow ? "+" : ""}
                   {formatMoney(Math.abs(t.amount))}
                 </span>

@@ -97,6 +97,10 @@ async function startServer(databaseUrl) {
       HOST: "127.0.0.1",
       LOG_LEVEL: "warn",
       SYNC_INTERVAL_SECONDS: "3600",
+      NAV_LINKS: JSON.stringify([
+        { label: "Ledger", url: "/" },
+        { label: "Bank sync", url: "https://bank-sync.example.com/", newTab: true },
+      ]),
     },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -179,6 +183,11 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("chart").locator("canvas").waitFor();
     await page.getByTestId("ranked-row").first().waitFor();
     await page.getByTestId("txn").first().waitFor();
+    const navLinks = await page.getByTestId("nav-link").evaluateAll((els) => els.map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("target")]));
+    assert(
+      JSON.stringify(navLinks) === JSON.stringify([["Ledger", "/", null], ["Bank sync", "https://bank-sync.example.com/", "_blank"]]),
+      `top bar shows the NAV_LINKS (${JSON.stringify(navLinks)})`,
+    );
     // Use 12 months so every sample merchant is in range.
     await page.getByTestId("range-12m").click();
     await page.waitForFunction(() => new URL(location.href).searchParams.get("from")?.endsWith("-01"));

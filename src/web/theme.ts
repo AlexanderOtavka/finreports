@@ -61,10 +61,11 @@ const FOLD_DARK = "#5c5b56";
 export function chartTheme(dark: boolean, colorFor: (key: string, index: number) => string): ChartTheme {
   return {
     dark,
-    text: dark ? "#ffffff" : "#0b0b0b",
-    textMuted: dark ? "#c3c2b7" : "#52514e",
-    surface: dark ? "#1a1a19" : "#fcfcfb",
-    grid: dark ? "#383835" : "#e6e5e0",
+    // Firefly III's (AdminLTE's) text and box colors; see styles.css.
+    text: dark ? "#e8ecee" : "#333333",
+    textMuted: dark ? "#b8c7ce" : "#777777",
+    surface: dark ? "#2c3b41" : "#ffffff",
+    grid: dark ? "#415761" : "#f4f4f4",
     colorFor,
     formatMoney: formatMoneyShort,
   };

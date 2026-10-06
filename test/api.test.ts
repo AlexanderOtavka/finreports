@@ -18,6 +18,7 @@ describe("API (sample backend, dev auth bypass)", async () => {
     SAMPLE_END_DATE: END,
     WEB_ROOT: "/nonexistent",
     LOG_LEVEL: "silent",
+    NAV_LINKS: '[{"label": "Ledger", "url": "/"}, {"label": "Docs", "url": "https://example.com/docs", "newTab": true}]',
   });
   const adapter = new SampleAdapter(db, { seed: 235, endDate: END });
   const sync = new SyncService(db, adapter, silentLog, { intervalMs: 1000, fullIntervalMs: 86_400_000 });
@@ -47,6 +48,14 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(ok.headers["content-security-policy"]).toContain("default-src 'self'");
     expect(ok.headers["x-frame-options"]).toBe("DENY");
     expect(ok.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("hands the top bar links to the web app", async () => {
+    const session = await get<{ navLinks: unknown }>("/reports/api/session");
+    expect(session.navLinks).toEqual([
+      { label: "Ledger", url: "/" },
+      { label: "Docs", url: "https://example.com/docs", newTab: true },
+    ]);
   });
 
   it("drills down the category report", async () => {
@@ -161,6 +170,27 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(deep.statusCode).toBe(400);
     const dup = await post("/reports/api/categories", { name: "groceries", parentId: null });
     expect(dup.statusCode).toBe(409);
+  });
+});
+
+describe("NAV_LINKS", () => {
+  const base = { BACKEND: "sample", DEV_AUTH_BYPASS: DEV_AUTH_BYPASS_VALUE };
+  it("defaults to none", () => {
+    expect(loadConfig(base).navLinks).toEqual([]);
+  });
+  it("accepts same-origin paths and http(s) URLs", () => {
+    const links = loadConfig({ ...base, NAV_LINKS: '[{"label":" Home ","url":"/"},{"label":"Out","url":"https://example.com/x","newTab":true}]' }).navLinks;
+    expect(links).toEqual([
+      { label: "Home", url: "/" },
+      { label: "Out", url: "https://example.com/x", newTab: true },
+    ]);
+  });
+  it("refuses anything else", () => {
+    expect(() => loadConfig({ ...base, NAV_LINKS: "Home=/" })).toThrow(/JSON array/);
+    expect(() => loadConfig({ ...base, NAV_LINKS: '{"label":"a","url":"/"}' })).toThrow(/JSON array/);
+    expect(() => loadConfig({ ...base, NAV_LINKS: '[{"label":"a","url":"javascript:alert(1)"}]' })).toThrow(/url must be/);
+    expect(() => loadConfig({ ...base, NAV_LINKS: '[{"label":"a","url":"//evil.example"}]' })).toThrow(/url must be/);
+    expect(() => loadConfig({ ...base, NAV_LINKS: '[{"label":"","url":"/"}]' })).toThrow(/label/);
   });
 });
 

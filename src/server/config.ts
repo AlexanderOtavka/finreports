@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { NavLink } from "../shared/api.js";
 
 /**
  * All configuration comes from the environment. Secrets may be given inline (`X`) or as a
@@ -48,6 +49,8 @@ export interface Config {
     fullIntervalMs: number;
     enabled: boolean;
   };
+  /** Links to other apps, shown in the top bar. */
+  navLinks: NavLink[];
   webRoot: string | undefined;
   logLevel: string;
 }
@@ -74,6 +77,43 @@ function list(env: Env, name: string, fallback: string): string[] {
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+/**
+ * `NAV_LINKS`: a JSON array of `{"label": "…", "url": "…"}`, optionally with
+ * `"newTab": true`. A URL is absolute (http or https) or a path on this origin ("/").
+ */
+function navLinks(env: Env): NavLink[] {
+  const raw = env.NAV_LINKS;
+  if (!raw || !raw.trim()) return [];
+  const shape = 'NAV_LINKS must be a JSON array of {"label", "url"} objects';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(shape);
+  }
+  if (!Array.isArray(parsed)) throw new Error(shape);
+  return parsed.map((item: unknown, i) => {
+    const { label, url, newTab } = (item ?? {}) as Record<string, unknown>;
+    if (typeof label !== "string" || !label.trim() || label.length > 40) {
+      throw new Error(`NAV_LINKS[${i}].label must be a non-empty string of at most 40 characters`);
+    }
+    const sameOrigin = typeof url === "string" && url.startsWith("/") && !url.startsWith("//");
+    let absolute = false;
+    if (typeof url === "string" && !sameOrigin) {
+      try {
+        absolute = ["http:", "https:"].includes(new URL(url).protocol);
+      } catch {
+        // not a URL
+      }
+    }
+    if (!sameOrigin && !absolute) {
+      throw new Error(`NAV_LINKS[${i}].url must be an http(s) URL or a path starting with /, got ${String(url)}`);
+    }
+    if (newTab !== undefined && typeof newTab !== "boolean") throw new Error(`NAV_LINKS[${i}].newTab must be true or false`);
+    return { label: label.trim(), url: url as string, ...(newTab ? { newTab } : {}) };
+  });
 }
 
 export function loadConfig(env: Env = process.env): Config {
@@ -139,6 +179,7 @@ export function loadConfig(env: Env = process.env): Config {
       fullIntervalMs: int(env, "FULL_SYNC_INTERVAL_HOURS", 24) * 3_600_000,
       enabled: env.SYNC_ENABLED !== "false",
     },
+    navLinks: navLinks(env),
     webRoot: env.WEB_ROOT || undefined,
     logLevel: env.LOG_LEVEL ?? "info",
   };

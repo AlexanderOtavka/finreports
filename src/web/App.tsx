@@ -261,9 +261,29 @@ export function App() {
   return (
     <main className="app">
       <header className="topbar">
-        <div className="topbar-row">
-          <h1>Reports</h1>
+        <div className="navbar">
+          <h1 className="brand">
+            <a href="/reports/">
+              <span>
+                <b>Finance</b> reports
+              </span>
+            </a>
+          </h1>
           {session?.devBypass && <span className="dev-badge" title="DEV_AUTH_BYPASS is on">dev</span>}
+          {session && session.navLinks.length > 0 && (
+            <nav className="nav-links" aria-label="Other apps">
+              {session.navLinks.map((l) => (
+                <a
+                  key={`${l.label}|${l.url}`}
+                  href={l.url}
+                  {...(l.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                  data-testid="nav-link"
+                >
+                  {l.label}
+                </a>
+              ))}
+            </nav>
+          )}
         </div>
         <nav className="tabs" aria-label="Reports">
           {REPORTS.map((r) => (
@@ -284,6 +304,7 @@ export function App() {
         </nav>
       </header>
 
+      <div className="page">
       <div className="range-bar" role="group" aria-label="Date range">
         {(Object.keys(RANGE_LABELS) as RangePreset[]).map((p) => (
           <button
@@ -413,6 +434,7 @@ export function App() {
           onOpen={setOpenTxn}
         />
       )}
+      </div>
       </div>
 
       {openTxn && categories && (
