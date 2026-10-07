@@ -202,7 +202,8 @@ nix develop -c npm run smoke
 
 Builds, starts a throwaway PostgreSQL and the real server (`BACKEND=sample`, dev bypass),
 and drives Chromium (playwright-core) at a phone (390×844) and a desktop (1280×900)
-viewport: load → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
+viewport: load on the last 30 days → 90 days → Custom (the URL switches from `range=` to
+dates) → 1 year → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
 Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categorize" → preview count
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the
 exported `decision_event` rows and their snapshot → the monthly report → dark mode. Any console

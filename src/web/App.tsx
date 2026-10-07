@@ -8,30 +8,39 @@ import { CategoryTree } from "./categories.js";
 import { Chart } from "./components/Chart.js";
 import { RecategorizeSheet } from "./components/RecategorizeSheet.js";
 import { TxnList } from "./components/TxnList.js";
-import { formatMoneyShort, formatRange, matchPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
+import { formatMoneyShort, formatRange, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
 import { chartTheme, ColorMemory, useDarkMode } from "./theme.js";
 
 // ---------------------------------------------------------------------------------------
 // URL state: the report, range and drill path live in the query string, so reload, share and
-// the back button (one step up the drill-down) all work.
+// the back button (one step up the drill-down) all work. A preset range is kept as its name
+// (`range=30d`), so the link still means "the last 30 days" tomorrow; only a custom range is
+// kept as dates (`from`, `to`).
 
-interface ViewState extends ReportQuery {}
+interface ViewState extends ReportQuery {
+  /** The preset the dates come from, or null for a custom range. */
+  range: RangePreset | null;
+}
+
+const presetView = (range: RangePreset) => ({ range, ...presetRange(range) });
 
 function readUrl(): ViewState {
   const params = new URLSearchParams(window.location.search);
   const report = findReport(params.get("r") ?? "") ?? REPORTS[0]!;
-  const range = presetRange(report.defaultRange);
   const valid = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const range = params.get("range");
+  const from = valid(params.get("from"));
+  const to = valid(params.get("to"));
+  const dates = isPreset(range) ? presetView(range) : from && to ? { range: null, from, to } : presetView(report.defaultRange);
   return {
     reportId: report.id,
-    from: valid(params.get("from")) ?? range.from,
-    to: valid(params.get("to")) ?? range.to,
+    ...dates,
     path: (params.get("p") ?? "").split("/").filter(Boolean).map(decodeURIComponent),
   };
 }
 
 function writeUrl(v: ViewState, push: boolean) {
-  const params = new URLSearchParams({ r: v.reportId, from: v.from, to: v.to });
+  const params = new URLSearchParams({ r: v.reportId, ...(v.range ? { range: v.range } : { from: v.from, to: v.to }) });
   if (v.path.length) params.set("p", v.path.map(encodeURIComponent).join("/"));
   const url = `${window.location.pathname}?${params}`;
   if (push) window.history.pushState(null, "", url);
@@ -115,7 +124,8 @@ export function App() {
   useEffect(() => {
     if (!session) return;
     const ctl = new AbortController();
-    const viewKey = JSON.stringify(view);
+    // A preset turned custom shows the same data, so it does not count as a new view.
+    const viewKey = JSON.stringify({ ...view, range: undefined });
     const isRefresh = viewKey === lastViewKey.current;
     lastViewKey.current = viewKey;
     if (!isRefresh) {
@@ -179,7 +189,9 @@ export function App() {
         return;
       }
       if (report.link) {
-        navigate(report.link(key, view));
+        // Same dates (a category over the whole range): keep the preset in the link.
+        const link = report.link(key, view);
+        navigate({ ...link, range: link.from === view.from && link.to === view.to ? view.range : null });
         window.scrollTo({ top: 0 });
         return;
       }
@@ -259,7 +271,6 @@ export function App() {
     );
   }
 
-  const preset = matchPreset(view.from, view.to);
   const rows = data ? (report.listRows ? report.listRows(data) : data.rows) : [];
   const total = data?.total ?? 0;
   const visibleRows = showAllRows ? rows : rows.slice(0, COLLAPSED_ROWS);
@@ -299,7 +310,7 @@ export function App() {
               className={`tab${r.id === report.id ? " active" : ""}`}
               aria-current={r.id === report.id ? "page" : undefined}
               onClick={() => {
-                navigate({ reportId: r.id, ...presetRange(r.defaultRange), path: [] });
+                navigate({ reportId: r.id, ...presetView(r.defaultRange), path: [] });
                 window.scrollTo({ top: 0 });
               }}
               data-testid={`report-${r.id}`}
@@ -316,10 +327,10 @@ export function App() {
           <button
             key={p}
             type="button"
-            className={`chip${preset === p ? " selected" : ""}`}
+            className={`chip${view.range === p ? " selected" : ""}`}
             onClick={() => {
               setCustomOpen(false);
-              navigate({ ...view, ...presetRange(p), path: [] }, false);
+              navigate({ ...view, ...presetView(p), path: [] }, false);
             }}
             data-testid={`range-${p}`}
             title={RANGE_TITLES[p]}
@@ -330,8 +341,13 @@ export function App() {
         ))}
         <button
           type="button"
-          className={`chip${!preset || customOpen ? " selected" : ""}`}
-          onClick={() => setCustomOpen((o) => !o)}
+          className={`chip${!view.range || customOpen ? " selected" : ""}`}
+          onClick={() => {
+            // From here on the range is these dates, not a preset, and the URL says so.
+            if (!customOpen && view.range) navigate({ ...view, range: null }, false);
+            setCustomOpen((o) => !o);
+          }}
+          data-testid="range-custom"
         >
           Custom
         </button>
@@ -344,7 +360,7 @@ export function App() {
               type="date"
               value={view.from}
               max={view.to}
-              onChange={(e) => e.target.value && navigate({ ...view, from: e.target.value, path: [] }, false)}
+              onChange={(e) => e.target.value && navigate({ ...view, range: null, from: e.target.value, path: [] }, false)}
             />
           </label>
           <label>
@@ -354,7 +370,7 @@ export function App() {
               value={view.to}
               min={view.from}
               max={today()}
-              onChange={(e) => e.target.value && navigate({ ...view, to: e.target.value, path: [] }, false)}
+              onChange={(e) => e.target.value && navigate({ ...view, range: null, to: e.target.value, path: [] }, false)}
             />
           </label>
         </div>
@@ -380,7 +396,9 @@ export function App() {
               );
             })}
           </nav>
-          <span className="range-label">{formatRange(view.from, view.to)}</span>
+          <span className="range-label" data-testid="range-label" data-from={view.from} data-to={view.to}>
+            {formatRange(view.from, view.to)}
+          </span>
         </div>
 
         {option && data && data.rows.length > 0 ? (

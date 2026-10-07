@@ -177,9 +177,10 @@ async function runFlow(name, options, chromiumPath, pg) {
     };
     const crumbs = () => page.getByTestId("breadcrumbs").innerText();
     const range = async () => {
-      const u = new URL(page.url());
-      return { from: u.searchParams.get("from"), to: u.searchParams.get("to") };
+      const label = page.getByTestId("range-label");
+      return { from: await label.getAttribute("data-from"), to: await label.getAttribute("data-to") };
     };
+    const urlParams = () => Object.fromEntries(new URL(page.url()).searchParams);
 
     // 1. Load: the donut and the ranked list render.
     await page.goto(`${server.base}/reports/`);
@@ -191,9 +192,24 @@ async function runFlow(name, options, chromiumPath, pg) {
       JSON.stringify(navLinks) === JSON.stringify([["Ledger", "/", null], ["Bank sync", "https://bank-sync.example.com/", "_blank"]]),
       `top bar shows the NAV_LINKS (${JSON.stringify(navLinks)})`,
     );
+    // A preset range is kept in the URL by name, not as dates.
+    const opened = urlParams();
+    assert(opened.range === "30d" && !opened.from && !opened.to, `opens on the last 30 days (${page.url()})`);
+    await shot("range-30d");
+    await page.getByTestId("range-90d").click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "90d");
+    await page.getByTestId("ranked-row").first().waitFor();
+    await shot("range-90d");
+    // "Custom" turns the preset into its dates.
+    const ninety = await range();
+    await page.getByTestId("range-custom").click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.has("from"));
+    assert(urlParams().from === ninety.from && urlParams().to === ninety.to && !urlParams().range, "custom keeps the dates in the URL");
+    await shot("range-custom");
     // Use 12 months so every sample merchant is in range.
     await page.getByTestId("range-12m").click();
-    await page.waitForFunction(() => new URL(location.href).searchParams.get("from")?.endsWith("-01"));
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "12m");
+    assert((await range()).from.endsWith("-01"), "12 months start on the 1st");
     await page.getByTestId("ranked-row").first().waitFor();
     await shot("load");
 
@@ -284,6 +300,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.mouse.click(bars.x + bars.width - 26, bars.y + 30);
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
     const month = await range();
+    assert(urlParams().from === month.from && urlParams().to === month.to && !urlParams().range, "a month is a custom range in the URL");
     assert(month.from.endsWith("-01") && month.from.slice(0, 7) === month.to.slice(0, 7), `opened one month (${month.from} – ${month.to})`);
     await page.getByTestId("ranked-row").first().waitFor();
     await page.getByTestId("txn").first().waitFor();
