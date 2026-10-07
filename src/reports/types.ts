@@ -71,7 +71,7 @@ export interface ReportLink {
   path: string[];
 }
 
-export type RangePreset = "30d" | "3m" | "6m" | "12m" | "ytd";
+export type RangePreset = "30d" | "90d" | "6m" | "12m" | "ytd";
 
 export interface ReportDefinition {
   id: string;
