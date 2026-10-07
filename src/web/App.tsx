@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OTHER_KEY } from "../reports/category-drilldown.js";
 import { findReport, REPORTS } from "../reports/index.js";
 import type { RangePreset } from "../reports/types.js";
-import type { RecategorizeRequest, ReportData, SessionDto, TxnDto } from "../shared/api.js";
+import type { AccountDto, RecategorizeRequest, ReportData, SessionDto, TxnDto } from "../shared/api.js";
 import { api, ApiError, type ReportQuery } from "./api.js";
 import { CategoryTree } from "./categories.js";
+import { AccountFilter } from "./components/AccountFilter.js";
 import { Chart } from "./components/Chart.js";
 import { RecategorizeSheet } from "./components/RecategorizeSheet.js";
 import { TxnList } from "./components/TxnList.js";
@@ -16,6 +17,10 @@ import { chartTheme, ColorMemory, useDarkMode } from "./theme.js";
 // the back button (one step up the drill-down) all work. A preset range is kept as its name
 // (`range=30d`), so the link still means "the last 30 days" tomorrow; only a custom range is
 // kept as dates (`from`, `to`).
+//
+// The account filter (`accounts=a,b`, absent for all) is read from the URL only when the page
+// loads: from then on it sticks, through report tabs, links between reports, and the back
+// button, until it is changed with the filter itself.
 
 interface ViewState extends ReportQuery {
   /** The preset the dates come from, or null for a custom range. */
@@ -36,12 +41,14 @@ function readUrl(): ViewState {
     reportId: report.id,
     ...dates,
     path: (params.get("p") ?? "").split("/").filter(Boolean).map(decodeURIComponent),
+    accounts: params.has("accounts") ? (params.get("accounts") ?? "").split(",").filter(Boolean).map(decodeURIComponent) : null,
   };
 }
 
 function writeUrl(v: ViewState, push: boolean) {
   const params = new URLSearchParams({ r: v.reportId, ...(v.range ? { range: v.range } : { from: v.from, to: v.to }) });
   if (v.path.length) params.set("p", v.path.map(encodeURIComponent).join("/"));
+  if (v.accounts) params.set("accounts", v.accounts.map(encodeURIComponent).join(","));
   const url = `${window.location.pathname}?${params}`;
   if (push) window.history.pushState(null, "", url);
   else window.history.replaceState(null, "", url);
@@ -68,6 +75,7 @@ export function App() {
   const [session, setSession] = useState<SessionDto | null>(null);
   const [categories, setCategories] = useState<CategoryTree | null>(null);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(readUrl);
   const [loaded, setData] = useState<ReportData | null>(null);
@@ -91,9 +99,10 @@ export function App() {
   const data = loaded?.reportId === report.id ? loaded : null;
 
   useEffect(() => {
-    Promise.all([api.session(), api.categories(), api.categoryOrder()])
-      .then(([s, c, order]) => {
+    Promise.all([api.session(), api.categories(), api.categoryOrder(), api.accounts()])
+      .then(([s, c, order, accts]) => {
         setCategoryOrder(order);
+        setAccounts(accts);
         setSession(s);
         setCategories(new CategoryTree(c));
       })
@@ -102,9 +111,16 @@ export function App() {
       });
   }, []);
 
+  const currentView = useRef(view);
+  currentView.current = view;
   useEffect(() => {
     writeUrl(view, false);
-    const onPop = () => setView(readUrl());
+    const onPop = () => {
+      // Back and forward move through reports, ranges and drill paths, not account filters.
+      const next = { ...readUrl(), accounts: currentView.current.accounts };
+      writeUrl(next, false);
+      setView(next);
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
     // Only on mount: later changes go through navigate().
@@ -116,6 +132,14 @@ export function App() {
     setView(next);
     setShowAllRows(false);
   }, []);
+
+  // Accounts the link names that no longer exist are dropped; none left, or every one, is all.
+  useEffect(() => {
+    if (!accounts.length || !view.accounts) return;
+    const known = accounts.filter((a) => view.accounts!.includes(a.id)).map((a) => a.id);
+    const next = known.length === 0 || known.length === accounts.length ? null : known;
+    if (JSON.stringify(next) !== JSON.stringify(view.accounts)) navigate({ ...view, accounts: next }, false);
+  }, [accounts, view, navigate]);
 
   // The custom dates are only open on a custom range: a preset (picked, a report tab's default,
   // or reached with the back button) closes them.
@@ -204,7 +228,7 @@ export function App() {
       if (report.link) {
         // Same dates (a category over the whole range): keep the preset in the link.
         const link = report.link(key, view);
-        navigate({ ...link, range: link.from === view.from && link.to === view.to ? view.range : null });
+        navigate({ ...link, accounts: view.accounts, range: link.from === view.from && link.to === view.to ? view.range : null });
         window.scrollTo({ top: 0 });
         return;
       }
@@ -300,7 +324,7 @@ export function App() {
       <header className="topbar">
         <div className="navbar">
           <h1 className="brand">
-            <a href="/reports/">
+            <a href={view.accounts ? `/reports/?${new URLSearchParams({ accounts: view.accounts.map(encodeURIComponent).join(",") })}` : "/reports/"}>
               <span>
                 <b>Finance</b> reports
               </span>
@@ -330,7 +354,7 @@ export function App() {
               className={`tab${r.id === report.id ? " active" : ""}`}
               aria-current={r.id === report.id ? "page" : undefined}
               onClick={() => {
-                navigate({ reportId: r.id, ...presetView(r.defaultRange), path: [] });
+                navigate({ reportId: r.id, ...presetView(r.defaultRange), path: [], accounts: view.accounts });
                 window.scrollTo({ top: 0 });
               }}
               data-testid={`report-${r.id}`}
@@ -392,6 +416,7 @@ export function App() {
           </label>
         </div>
       )}
+      <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)} />
 
       <div className="content">
       <section className="card chart-card" aria-busy={dataLoading}>
