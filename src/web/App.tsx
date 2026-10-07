@@ -116,6 +116,12 @@ export function App() {
     setShowAllRows(false);
   }, []);
 
+  // The custom dates are only open on a custom range: a preset (picked, a report tab's default,
+  // or reached with the back button) closes them.
+  useEffect(() => {
+    if (view.range) setCustomOpen(false);
+  }, [view.range]);
+
   // Load the chart and the first page of transactions whenever the view changes; a refresh
   // (after a recategorization) reloads both without blanking the screen.
   const loadedCount = useRef(0);
@@ -328,10 +334,7 @@ export function App() {
             key={p}
             type="button"
             className={`chip${view.range === p ? " selected" : ""}`}
-            onClick={() => {
-              setCustomOpen(false);
-              navigate({ ...view, ...presetView(p), path: [] }, false);
-            }}
+            onClick={() => navigate({ ...view, ...presetView(p), path: [] }, false)}
             data-testid={`range-${p}`}
             title={RANGE_TITLES[p]}
             aria-label={RANGE_TITLES[p]}
@@ -341,7 +344,7 @@ export function App() {
         ))}
         <button
           type="button"
-          className={`chip${!view.range || customOpen ? " selected" : ""}`}
+          className={`chip${view.range ? "" : " selected"}`}
           onClick={() => {
             // From here on the range is these dates, not a preset, and the URL says so.
             if (!customOpen && view.range) navigate({ ...view, range: null }, false);
