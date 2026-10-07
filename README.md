@@ -25,8 +25,8 @@ chart's range and drill path (it says which, under the bar). In a transaction, t
 name searches the list for that merchant, in place, and "Look up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
 website and location for the merchant, and the ledger's notes and tags, are shown there too.
 
-Every report counts all accounts until you check only some of them under the range bar, to
-see one credit card's spending or leave one out. The choice is kept in the URL
+Every report counts all accounts until you check only some of them (the button by the date
+range), to see one credit card's spending or leave one out. The choice is kept in the URL
 (`accounts=…`) and sticks through report tabs, ranges, drill-downs and the back button; only
 loading a URL without it shows all accounts again.
 

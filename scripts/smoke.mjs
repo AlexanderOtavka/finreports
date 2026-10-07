@@ -431,6 +431,11 @@ async function runFlow(name, options, chromiumPath, pg) {
     //     shows all accounts again.
     await page.getByTestId("txn-search").fill("");
     const accountsParam = () => new URL(page.url()).searchParams.get("accounts");
+    // Next to the range bar where both fit, below it on a phone.
+    const rangeBox = await page.locator(".range-bar").boundingBox();
+    const toggleBox = await page.getByTestId("accounts-toggle").boundingBox();
+    const oneLine = toggleBox.y < rangeBox.y + rangeBox.height;
+    assert(oneLine === options.viewport.width >= 768, `account filter ${oneLine ? "beside" : "below"} the range bar at ${options.viewport.width}px`);
     await page.getByTestId("accounts-toggle").click();
     await page.getByTestId("accounts").waitFor();
     const onlyJordan = page.waitForResponse((res) => res.url().includes("/data?") && new URL(res.url()).searchParams.get("accounts") === "jordan");

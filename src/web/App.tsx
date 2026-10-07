@@ -366,6 +366,7 @@ export function App() {
       </header>
 
       <div className="page">
+      <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)}>
       <div className="range-bar" role="group" aria-label="Date range">
         {(Object.keys(RANGE_LABELS) as RangePreset[]).map((p) => (
           <button
@@ -393,6 +394,7 @@ export function App() {
           Custom
         </button>
       </div>
+      </AccountFilter>
       {customOpen && (
         <div className="custom-range">
           <label>
@@ -416,7 +418,6 @@ export function App() {
           </label>
         </div>
       )}
-      <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)} />
 
       <div className="content">
       <section className="card chart-card" aria-busy={dataLoading}>
