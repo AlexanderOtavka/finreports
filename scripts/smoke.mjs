@@ -293,7 +293,14 @@ async function runFlow(name, options, chromiumPath, pg) {
 
     // 9. The other report: bars stacked by category, listed under the chart as its legend. A
     //    tap in the last month's column, above its bar, opens the category donut for that month.
+    //    Leaving a custom range for it selects only its preset and closes the custom dates.
+    await page.getByTestId("range-custom").click();
+    await page.locator(".custom-range").waitFor();
     await page.getByTestId("report-monthly-trend").click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.has("range"));
+    const chips = await page.locator(".range-bar .chip.selected").evaluateAll((els) => els.map((el) => el.textContent));
+    assert(chips.length === 1 && chips[0] !== "Custom", `one range selected after switching report (${chips})`);
+    assert(!(await page.locator(".custom-range").count()), "custom dates closed after switching report");
     await page.locator('[data-testid=ranked-row][data-key="rent-and-utilities"]').waitFor();
     await shot("monthly");
     const bars = await page.getByTestId("chart").boundingBox();
