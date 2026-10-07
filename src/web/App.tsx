@@ -82,6 +82,7 @@ export function App() {
   const [showAllRows, setShowAllRows] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [search, setSearch] = useState<string | null>(null);
   const dark = useDarkMode();
   const colors = useRef(new ColorMemory());
 
@@ -161,11 +162,11 @@ export function App() {
     return () => ctl.abort();
   }, [session, view, refreshTick]);
 
-  const loadMore = useCallback(() => {
+  const loadMore = useCallback((limit?: number) => {
     if (!cursor || txnLoading) return;
     setTxnLoading(true);
     api
-      .transactions(view, cursor)
+      .transactions(view, cursor, undefined, limit)
       .then((page) => {
         setTxns((prev) => [...prev, ...page.items.filter((t) => !prev.some((p) => p.id === t.id))]);
         setCursor(page.nextCursor);
@@ -176,6 +177,12 @@ export function App() {
         setToast({ id: Date.now(), text: err.message, error: true });
       });
   }, [cursor, txnLoading, view]);
+
+  // Search runs in the browser, over every transaction in the selection: while it is open,
+  // load the rest in big pages.
+  useEffect(() => {
+    if (search !== null && cursor && !txnLoading) loadMore(500);
+  }, [search, cursor, txnLoading, loadMore]);
 
   useEffect(() => {
     if (!toast) return;
@@ -267,6 +274,27 @@ export function App() {
 
   const closeSheet = useCallback(() => setOpenTxn(null), []);
 
+  // The merchant's name in the sheet: every transaction from that merchant in this range,
+  // whatever its category, so the drill path goes.
+  const searchMerchant = useCallback(
+    (txn: TxnDto) => {
+      setOpenTxn(null);
+      setSearch(`"${txn.merchant}"`);
+      if (view.path.length) navigate({ ...view, path: [] });
+    },
+    [view, navigate],
+  );
+
+  // The sticky search bar sits right under the sticky top bar.
+  const topbar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = topbar.current;
+    if (!node) return;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${node.offsetHeight}px`));
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [fatal]);
+
   // --- Rendering -------------------------------------------------------------------------
 
   if (fatal) {
@@ -283,7 +311,7 @@ export function App() {
 
   return (
     <main className="app">
-      <header className="topbar">
+      <header className="topbar" ref={topbar}>
         <div className="navbar">
           <h1 className="brand">
             <a href="/reports/">
@@ -457,6 +485,8 @@ export function App() {
           hasMore={cursor !== null}
           categories={categories}
           flash={flash}
+          search={search}
+          onSearch={setSearch}
           onLoadMore={loadMore}
           onOpen={setOpenTxn}
         />
@@ -465,7 +495,14 @@ export function App() {
       </div>
 
       {openTxn && categories && (
-        <RecategorizeSheet txn={openTxn} categories={categories} uiContext={uiContext} onClose={closeSheet} onSave={onSave} />
+        <RecategorizeSheet
+          txn={openTxn}
+          categories={categories}
+          uiContext={uiContext}
+          onClose={closeSheet}
+          onSave={onSave}
+          onSearchMerchant={searchMerchant}
+        />
       )}
 
       {toast && (

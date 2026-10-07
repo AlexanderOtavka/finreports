@@ -170,6 +170,11 @@ export class SyncService {
       counterparty: b.counterparty,
       plaid_primary: b.plaid?.primary ?? null,
       plaid_detailed: b.plaid?.detailed ?? null,
+      website: b.website ?? null,
+      latitude: b.location?.lat ?? null,
+      longitude: b.location?.lon ?? null,
+      notes: b.notes ?? null,
+      tags: b.tags ?? [],
       backend_updated_at: b.updatedAt,
     };
     const row = existing.get(b.externalId);
@@ -190,8 +195,8 @@ export class SyncService {
         `INSERT INTO txn (backend, external_id, group_id, date, amount, currency, type, pending, merchant,
            merchant_key, description, account_id, account_name, counterparty, plaid_primary, plaid_detailed,
            backend_updated_at, backend_category, category_id, category_provenance, category_set_at,
-           backend_dirty, needs_rules)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),$21,$22)
+           backend_dirty, needs_rules, website, latitude, longitude, notes, tags)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),$21,$22,$23,$24,$25,$26,$27)
          RETURNING *`,
         [
           this.adapter.name,
@@ -216,6 +221,11 @@ export class SyncService {
           category.provenance,
           category.dirty,
           category.needsRules,
+          fields.website,
+          fields.latitude,
+          fields.longitude,
+          fields.notes,
+          fields.tags,
         ],
       );
       existing.set(b.externalId, res.rows[0]!);
@@ -229,6 +239,7 @@ export class SyncService {
         const wasIso = was instanceof Date ? was.toISOString() : was;
         return (typeof now === "string" ? new Date(now).toISOString() : null) !== (wasIso ?? null);
       }
+      if (k === "tags") return JSON.stringify(now) !== JSON.stringify(was);
       return now !== was;
     });
     // The backend's category moved and it was not us: someone or something there chose it.
@@ -240,8 +251,8 @@ export class SyncService {
       `UPDATE txn SET group_id=$2, date=$3, amount=$4, currency=$5, type=$6, pending=$7, merchant=$8,
          merchant_key=$9, description=$10, account_id=$11, account_name=$12, counterparty=$13,
          plaid_primary=$14, plaid_detailed=$15, backend_updated_at=$16, synced_at=now(), deleted_at=NULL,
-         needs_rules=$17
-         ${backendRecategorized ? ", backend_category=$18, category_id=$19, category_provenance=$20, category_set_at=now()" : ""}
+         needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22
+         ${backendRecategorized ? ", backend_category=$23, category_id=$24, category_provenance=$25, category_set_at=now()" : ""}
        WHERE id=$1`,
       [
         row.id,
@@ -261,6 +272,11 @@ export class SyncService {
         fields.plaid_detailed,
         fields.backend_updated_at,
         needsRules,
+        fields.website,
+        fields.latitude,
+        fields.longitude,
+        fields.notes,
+        fields.tags,
         ...(backendRecategorized ? [b.category, fromBackend.categoryId, fromBackend.provenance] : []),
       ],
     );

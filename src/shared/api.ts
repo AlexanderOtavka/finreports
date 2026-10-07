@@ -18,10 +18,18 @@ export interface TxnDto {
   merchantKey: string;
   description: string;
   accountName: string | null;
+  /** The payee or payer as the ledger names it, when that differs from `merchant`. */
+  counterparty: string | null;
   type: "withdrawal" | "deposit" | "transfer";
   pending: boolean;
   plaidPrimary: string | null;
   plaidDetailed: string | null;
+  /** The merchant's website, `https://…`. */
+  website: string | null;
+  /** Where the purchase happened. */
+  location: { lat: number; lon: number } | null;
+  notes: string | null;
+  tags: string[];
   categoryId: string | null;
   /** `plaid`, `backend`, `manual`, `rule:<id>`, or `none`. */
   provenance: string;

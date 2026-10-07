@@ -45,6 +45,12 @@ export interface SampleTxn {
   /** What a careful person would call it; differs from `plaid` for mis-categorizations. */
   truth: { primary: string; detailed: string };
   replacesExternalId: string | null;
+  /** What Plaid knows about the merchant, as the connector writes it into the ledger. */
+  website: string | null;
+  location: { lat: number; lon: number } | null;
+  /** Notes and tags someone added in the ledger. */
+  notes: string | null;
+  tags: string[];
 }
 
 // ---------------------------------------------------------------------------------------
@@ -257,6 +263,97 @@ const COFFEE: Array<{ merchant: string | null; desc: string; plaid?: Cat }> = [
   { merchant: null, desc: "JOE PRO SHOP 0118 NEW YORK NY", plaid: C.otherShopping },
   { merchant: "Gorilla Coffee", desc: "SQ *GORILLA COFFEE" },
 ];
+
+/**
+ * Plaid's website and location for a merchant, matched on its name or raw description: chains
+ * and online shops have a website, the shops and restaurants down the street a location (as
+ * Plaid has them: not for every merchant, and often not for the ones that most need it).
+ */
+const MERCHANT_DETAILS: Array<{ match: RegExp; website?: string; at?: readonly [lat: number, lon: number] }> = [
+  { match: /^Lucali$/, website: "lucali.com", at: [40.6818, -73.9998] },
+  { match: /^Roberta's$/, website: "robertaspizza.com", at: [40.7051, -73.9336] },
+  { match: /^Olmsted$/, website: "olmstednyc.com", at: [40.6775, -73.9685] },
+  { match: /KING NOODLE/, at: [40.7004, -73.9268] },
+  { match: /^Fonda$/, website: "fondarestaurant.com", at: [40.6693, -73.9817] },
+  { match: /TACOS EL BRAVO/, at: [40.6449, -74.0108] },
+  { match: /^Miriam$/, website: "miriamrestaurant.com", at: [40.6761, -73.9806] },
+  { match: /^Shake Shack$/, website: "shakeshack.com", at: [40.6911, -73.9868] },
+  { match: /^Sweetgreen$/, website: "sweetgreen.com", at: [40.7392, -73.9897] },
+  { match: /^Blue Bottle Coffee$/, website: "bluebottlecoffee.com", at: [40.7186, -73.9563] },
+  { match: /^Devoción$/, website: "devocion.com", at: [40.7163, -73.9649] },
+  // The card reader says "pro shop"; the location and website say coffee.
+  { match: /JOE PRO SHOP/, website: "joecoffeecompany.com", at: [40.7335, -74.0027] },
+  { match: /^Gorilla Coffee$/, website: "gorillacoffee.com", at: [40.6786, -73.9792] },
+  { match: /^Trader Joe's$/, website: "traderjoes.com", at: [40.6886, -73.9922] },
+  { match: /^Whole Foods Market$/, website: "wholefoodsmarket.com", at: [40.6747, -73.9895] },
+  { match: /^FreshDirect$/, website: "freshdirect.com" },
+  { match: /^Slope Cellars$/, at: [40.6719, -73.9772] },
+  { match: /^The Gate$/, at: [40.6730, -73.9830] },
+  { match: /^Target$/, website: "target.com", at: [40.6838, -73.9772] },
+  { match: /^Uniqlo$/, website: "uniqlo.com", at: [40.7240, -73.9985] },
+  { match: /BRKLYN HARDWARE/, at: [40.6774, -73.9805] },
+  { match: /BROOKLYN CAT CLINIC/, at: [40.6702, -73.9858] },
+  { match: /PARK SLOPE DENTAL/, at: [40.6741, -73.9786] },
+  { match: /FRESH CUTS BARBERSHOP/, at: [40.6787, -73.9744] },
+  { match: /BLINK FITNESS/, website: "blinkfitness.com", at: [40.6804, -73.9752] },
+  { match: /^Equinox$/, website: "equinox.com", at: [40.6929, -73.9918] },
+  { match: /^CVS$/, website: "cvs.com", at: [40.6765, -73.9799] },
+  { match: /^Alamo Drafthouse$/, website: "drafthouse.com", at: [40.6911, -73.9837] },
+  { match: /^Brooklyn Museum$/, website: "brooklynmuseum.org", at: [40.6712, -73.9636] },
+  { match: /^Amazon$/, website: "amazon.com" },
+  { match: /^Chewy$/, website: "chewy.com" },
+  { match: /^DoorDash$/, website: "doordash.com" },
+  { match: /^Uber Eats$/, website: "ubereats.com" },
+  { match: /^Uber$/, website: "uber.com" },
+  { match: /^Lyft$/, website: "lyft.com" },
+  { match: /^Citi Bike$/, website: "citibikenyc.com" },
+  { match: /^(MTA|OMNY)$/, website: "mta.info" },
+  { match: /^Amtrak$/, website: "amtrak.com" },
+  { match: /^Airbnb$/, website: "airbnb.com" },
+  { match: /^Marriott$/, website: "marriott.com" },
+  { match: /^TAP AIR PORTUGAL/, website: "flytap.com" },
+  { match: /^UNITED /, website: "united.com" },
+  { match: /^Netflix$/, website: "netflix.com" },
+  { match: /SPOTIFY/, website: "spotify.com" },
+  { match: /^The New York Times$/, website: "nytimes.com" },
+  { match: /^WNYC$/, website: "wnyc.org" },
+  { match: /^Con Edison$/, website: "coned.com" },
+  { match: /^Verizon Fios$/, website: "verizon.com" },
+  { match: /^T-Mobile$/, website: "t-mobile.com" },
+  { match: /^Lemonade$/, website: "lemonade.com" },
+  { match: /^One Medical$/, website: "onemedical.com", at: [40.6889, -73.9910] },
+  { match: /^Ticketmaster$/, website: "ticketmaster.com" },
+  { match: /^USPS$/, website: "usps.com", at: [40.6797, -73.9781] },
+  { match: /^Venmo$/, website: "venmo.com" },
+];
+
+/** Where each trip happened, for the meals and rides there. */
+const TRIP_CENTER: Record<(typeof TRIPS)[number]["place"], readonly [number, number]> = {
+  Chicago: [41.8837, -87.6324],
+  Boston: [42.3555, -71.0605],
+  Lisbon: [38.7110, -9.1366],
+  Montauk: [41.0359, -71.9545],
+};
+
+/** Plaid's details for this charge, and the notes and tags a careful person added. */
+function detailsFor(e: Emit, day: Day): Pick<SampleTxn, "website" | "location" | "notes" | "tags"> {
+  const name = e.merchant ?? e.description;
+  const known = MERCHANT_DETAILS.find((d) => d.match.test(name));
+  const trip = tripOn(day);
+  const booked = tripBookedOn(day);
+  const travel = e.plaid === C.flights || e.plaid === C.lodging || e.merchant === "Amtrak";
+  // At home these are skipped on trip days, so on one they are the trip's (bills are not).
+  const away = e.plaid === C.restaurant || e.plaid === C.rideshare || e.plaid === C.fxFee;
+  const tripOf = booked && travel ? booked : trip && away ? trip : undefined;
+  // Spending on a trip happens there; the ledger says so with a tag.
+  const at = known?.at ?? (trip && tripOf === trip && e.plaid !== C.fxFee ? TRIP_CENTER[trip.place] : undefined);
+  return {
+    website: known?.website ? `https://${known.website}` : null,
+    location: at ? { lat: at[0], lon: at[1] } : null,
+    notes: /CAT CLINIC/.test(name) ? "Miso's checkup and shots" : booked && travel ? `${booked.place} trip` : null,
+    tags: tripOf ? [`trip-${tripOf.place.toLowerCase()}`] : [],
+  };
+}
 
 const generators: Generator[] = [
   // --- Income -------------------------------------------------------------------------
@@ -725,6 +822,7 @@ export function generateDay(seed: number, iso: string, endDate: string): SampleT
         plaid: { primary: e.plaid[0], detailed: e.plaid[1] },
         truth: { primary: (e.truth ?? e.plaid)[0], detailed: (e.truth ?? e.plaid)[1] },
         replacesExternalId: !pending && isCard && e.tipped && daysOld < 10 ? `${id}~pending` : null,
+        ...detailsFor(e, day),
       });
     }
   });

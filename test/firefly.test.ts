@@ -24,7 +24,11 @@ function split(overrides: Record<string, unknown>) {
     budget_id: null,
     category_id: "7",
     category_name: "Food and Drink",
-    tags: ["plaid-detailed-cat-coffee"],
+    tags: ["plaid-detailed-cat-coffee", "work"],
+    notes: "Coffee with the new hire ",
+    external_url: "https://bluebottlecoffee.com",
+    latitude: 40.7186,
+    longitude: -73.9563,
     external_id: "plaid-abc",
     reconciled: false,
     ...overrides,
@@ -122,6 +126,10 @@ describe("Firefly adapter", () => {
                   destination_name: "Savings",
                   category_name: null,
                   tags: [],
+                  notes: "  ",
+                  external_url: "flytap.com",
+                  latitude: null,
+                  longitude: "-73.9",
                 }),
                 split({ transaction_journal_id: "104", type: "opening balance" }),
               ]),
@@ -162,6 +170,10 @@ describe("Firefly adapter", () => {
       accountId: "3",
       accountName: "Bilt Mastercard",
       counterparty: "Blue Bottle Coffee",
+      website: "https://bluebottlecoffee.com",
+      location: { lat: 40.7186, lon: -73.9563 },
+      notes: "Coffee with the new hire",
+      tags: ["work"],
       plaid: { primary: "FOOD_AND_DRINK", detailed: "COFFEE" },
       category: "Food and Drink",
       categoryFromPlaid: true,
@@ -169,6 +181,8 @@ describe("Firefly adapter", () => {
     });
     expect(pay).toMatchObject({ amount: 3412.55, type: "deposit", accountName: "Joint Checking", merchant: "Acme Analytics", plaid: { primary: "INCOME", detailed: "SALARY" } });
     expect(transfer).toMatchObject({ amount: -1000, type: "transfer", merchant: null, counterparty: "Savings", plaid: null, category: null, categoryFromPlaid: false });
+    // Blank notes, a URL Firefly would not link, and half a location are nothing.
+    expect(transfer).toMatchObject({ notes: null, website: null, location: null, tags: [] });
     expect(eats).toMatchObject({ merchant: null, category: "Dining Out", categoryFromPlaid: false, plaid: { primary: "TRANSPORTATION", detailed: "TAXIS_AND_RIDE_SHARES" } });
   });
 

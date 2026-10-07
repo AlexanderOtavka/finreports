@@ -21,6 +21,11 @@ export interface TxnRow {
   counterparty: string | null;
   plaid_primary: string | null;
   plaid_detailed: string | null;
+  website: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  notes: string | null;
+  tags: string[];
   backend_category: string | null;
   category_id: string | null;
   category_provenance: string;
@@ -43,13 +48,23 @@ export function toDto(row: TxnRow): TxnDto {
     merchantKey: row.merchant_key,
     description: row.description,
     accountName: row.account_name,
+    // Only when it says more than the merchant name does.
+    counterparty: row.counterparty && row.counterparty !== row.merchant ? row.counterparty : null,
     type: row.type,
     pending: row.pending,
     plaidPrimary: row.plaid_primary,
     plaidDetailed: row.plaid_detailed,
+    website: row.website,
+    location: location(row),
+    notes: row.notes,
+    tags: row.tags,
     categoryId: row.category_id,
     provenance: row.category_provenance,
   };
+}
+
+function location(row: TxnRow): { lat: number; lon: number } | null {
+  return row.latitude !== null && row.longitude !== null ? { lat: row.latitude, lon: row.longitude } : null;
 }
 
 export function toSubject(row: TxnRow): RuleSubject {
@@ -79,6 +94,10 @@ export function snapshot(row: TxnRow): Record<string, unknown> {
     counterparty: row.counterparty,
     plaidPrimary: row.plaid_primary,
     plaidDetailed: row.plaid_detailed,
+    website: row.website,
+    location: location(row),
+    notes: row.notes,
+    tags: row.tags,
     backendCategory: row.backend_category,
     categoryId: row.category_id,
     categoryProvenance: row.category_provenance,

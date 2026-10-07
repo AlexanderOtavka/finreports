@@ -15,6 +15,16 @@ donut for just that month. The transactions behind the selection scroll below th
 one to recategorize it, or to "always categorize" that merchant: a rule, previewed against
 past transactions and optionally applied to them.
 
+The magnifier above the transactions searches them, right in the browser: every word has to
+match some field (merchant, date as `2026-09-14`, `9/14`, `Sep 14` or `Monday`, category,
+amount, the bank's raw description, account, notes, tags, website), so `trader sep` is
+Trader Joe's in September. `"Quoted words"` stay together, and a number is a whole number
+(`20` is the 20th or $20, not 2025). Matches are highlighted; a word found only in a field
+the list does not show (a note, a tag) brings that field up under the row. In a transaction,
+the merchant's name searches for all of that merchant's transactions in the range, and "Look
+up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
+website and location for the merchant, and the ledger's notes and tags, are shown there too.
+
 A category keeps its color in every chart, range and drill level: the eight biggest
 top-level categories of all time take the eight palette hues, in order (the smaller ones are
 gray and fold into "Other"). Subcategories and merchants are shades of their category's hue.
@@ -56,7 +66,9 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
 - **Database** (`migrations/`, plain SQL, applied at startup):
   - `txn`: normalized mirror of the backend's transactions, one row per split, with the
     category's **provenance**: `plaid` (the importer's guess from Plaid), `backend` (someone
-    or something in the ledger chose it), `rule:<id>`, `manual`, or `none`.
+    or something in the ledger chose it), `rule:<id>`, `manual`, or `none`. Also the
+    merchant's website and location (the Plaid connector writes Plaid's into Firefly's
+    external URL and latitude/longitude), and the ledger's notes and tags.
   - `category`: the tree (two levels), seeded from Plaid's primary/detailed taxonomy. Firefly's
     categories are flat, so the tree lives here; top-level names are the names the Plaid
     connector writes, so Firefly's categories map back by name.
@@ -203,10 +215,13 @@ nix develop -c npm run smoke
 Builds, starts a throwaway PostgreSQL and the real server (`BACKEND=sample`, dev bypass),
 and drives Chromium (playwright-core) at a phone (390×844) and a desktop (1280×900)
 viewport: load on the last 30 days → 90 days → Custom (the URL switches from `range=` to
-dates) → 1 year → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
+dates) → 1 year → search the transactions (`trader`, then `trader <month>`, then a word only
+in the notes) → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
 Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categorize" → preview count
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the
-exported `decision_event` rows and their snapshot → the monthly report → dark mode. Any console
+exported `decision_event` rows and their snapshot → the monthly report → a month → a
+merchant → its transaction's website, location and "Look up" → tap the merchant's name: the
+search shows all of its transactions, then a year of them → dark mode. Any console
 error, page error, failed request, or HTTP error fails it. Screenshots of every step land in
 `smoke-output/<viewport>/` (gitignored): look at them. `SMOKE_VIEWPORTS=phone` limits the run;
 `CHROMIUM_PATH` picks the browser. `nix flake check` runs it too, in the build sandbox, and CI

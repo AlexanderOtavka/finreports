@@ -30,6 +30,14 @@ export interface BackendTxn {
   counterparty: string | null;
   /** Plaid's personal finance category, as SCREAMING_SNAKE primary/detailed. */
   plaid: { primary: string; detailed: string } | null;
+  /** The merchant's website (`https://…`), if the backend knows it. */
+  website?: string | null;
+  /** Where the purchase happened, if the backend knows. */
+  location?: { lat: number; lon: number } | null;
+  /** Free-text notes kept in the backend. */
+  notes?: string | null;
+  /** The backend's tags, other than the ones that only carry Plaid's category. */
+  tags?: string[];
   /** The backend's category name, if any. */
   category: string | null;
   /** `category` is the one the backend's importer derived from `plaid`, untouched since. */
