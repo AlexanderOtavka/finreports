@@ -426,6 +426,44 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("txn-search").evaluate((el) => el.closest("section").scrollIntoView({ block: "start" }));
     await shot("dark-search");
 
+    // 12. The account filter: only one card, then a second one. It sticks through report tabs,
+    //     ranges, links between reports and the back button; a fresh load of a URL without it
+    //     shows all accounts again.
+    await page.getByTestId("txn-search").fill("");
+    const accountsParam = () => new URL(page.url()).searchParams.get("accounts");
+    // Next to the range bar where both fit, below it on a phone.
+    const rangeBox = await page.locator(".range-bar").boundingBox();
+    const toggleBox = await page.getByTestId("accounts-toggle").boundingBox();
+    const oneLine = toggleBox.y < rangeBox.y + rangeBox.height;
+    assert(oneLine === options.viewport.width >= 768, `account filter ${oneLine ? "beside" : "below"} the range bar at ${options.viewport.width}px`);
+    await page.getByTestId("accounts-toggle").click();
+    await page.getByTestId("accounts").waitFor();
+    const onlyJordan = page.waitForResponse((res) => res.url().includes("/data?") && new URL(res.url()).searchParams.get("accounts") === "jordan");
+    await page.getByRole("button", { name: "Only Jordan Rewards Visa ••3308" }).click();
+    await onlyJordan;
+    assert(accountsParam() === "jordan", `only one account in the URL (${page.url()})`);
+    assert((await page.getByTestId("accounts-toggle").innerText()).includes("Jordan Rewards Visa"), "the filter names the account");
+    assert(await page.locator('[data-testid=account-checkbox][data-account="jordan"]').isDisabled(), "the last checked account cannot be unchecked");
+    await page.locator('[data-testid=account-checkbox][data-account="sam"]').check();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("accounts") === "jordan,sam");
+    await shot("accounts");
+    await page.getByTestId("report-monthly-trend").click();
+    await page.getByTestId("ranked-row").first().waitFor();
+    assert(accountsParam() === "jordan,sam", "a report tab keeps the accounts");
+    await page.getByTestId("range-90d").click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "90d");
+    assert(accountsParam() === "jordan,sam", "a range keeps the accounts");
+    await page.getByTestId("ranked-row").first().click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
+    assert(accountsParam() === "jordan,sam", "a link to another report keeps the accounts");
+    await page.goBack();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "monthly-trend");
+    assert(accountsParam() === "jordan,sam", "the back button keeps the accounts");
+    assert((await page.getByTestId("accounts-toggle").innerText()).includes("2 of 4"), "the filter counts the accounts");
+    await page.goto(`${server.base}/reports/?r=spending-by-category&range=12m`);
+    await page.getByTestId("ranked-row").first().waitFor();
+    assert(accountsParam() === null && (await page.getByTestId("accounts-toggle").innerText()).includes("All accounts"), "a fresh load without the filter shows all accounts");
+
     await context.close();
   } finally {
     await browser.close();

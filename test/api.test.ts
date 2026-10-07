@@ -4,7 +4,7 @@ import { SampleAdapter } from "../src/server/adapters/sample.js";
 import { buildApp } from "../src/server/app.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
 import { SyncService } from "../src/server/sync.js";
-import type { ReportData, TxnPage } from "../src/shared/api.js";
+import type { AccountDto, ReportData, TxnPage } from "../src/shared/api.js";
 import { merchantRule } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
@@ -110,6 +110,32 @@ describe("API (sample backend, dev auth bypass)", async () => {
     );
     expect(second.items[0]!.id).not.toBe(first.items[0]!.id);
     expect(second.items[0]!.date <= first.items[19]!.date).toBe(true);
+  });
+
+  it("limits reports to the chosen accounts", async () => {
+    const accounts = await get<AccountDto[]>("/reports/api/accounts");
+    expect(accounts.map((a) => a.id).sort()).toEqual(["chk", "jordan", "sam", "sav"]);
+    expect(accounts.find((a) => a.id === "jordan")!.name).toBe("Jordan Rewards Visa ••3308");
+
+    const all = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}`);
+    const jordan = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=jordan`);
+    const rest = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=chk,sam,sav`);
+    expect(jordan.total).toBeGreaterThan(0);
+    expect(jordan.total).toBeLessThan(all.total);
+    expect(jordan.total + rest.total).toBeCloseTo(all.total, 2);
+
+    const txns = await get<TxnPage>(`/reports/api/reports/spending-by-category/transactions?${RANGE}&accounts=jordan&limit=500`);
+    expect(txns.items.length).toBeGreaterThan(0);
+    expect(txns.items.every((t) => t.accountName === "Jordan Rewards Visa ••3308")).toBe(true);
+
+    // The filter applies at every drill level, and to the monthly report too.
+    const food = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=jordan&path=food-and-drink`);
+    expect(food.total).toBeCloseTo(jordan.rows.find((r) => r.key === "food-and-drink")!.value, 2);
+    const months = await get<ReportData>(`/reports/api/reports/monthly-trend/data?${RANGE}&accounts=jordan`);
+    const sept = await get<ReportData>("/reports/api/reports/spending-by-category/data?from=2026-09-01&to=2026-09-30&accounts=jordan");
+    const septBar = months.rows.filter((r) => r.key === "2026-09").reduce((sum, r) => sum + r.value, 0);
+    expect(septBar).toBeGreaterThan(0);
+    expect(septBar).toBeCloseTo(sept.total, 2);
   });
 
   it("runs the monthly trend report", async () => {

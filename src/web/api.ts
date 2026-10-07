@@ -1,4 +1,5 @@
 import type {
+  AccountDto,
   CategoryDto,
   RecategorizeRequest,
   RecategorizeResponse,
@@ -55,11 +56,14 @@ export interface ReportQuery {
   from: string;
   to: string;
   path: string[];
+  /** Only these accounts' transactions; null for all. */
+  accounts: string[] | null;
 }
 
 const qs = (q: ReportQuery, extra: Record<string, string | undefined> = {}) => {
   const params = new URLSearchParams({ from: q.from, to: q.to });
   if (q.path.length) params.set("path", q.path.map(encodeURIComponent).join("/"));
+  if (q.accounts) params.set("accounts", q.accounts.map(encodeURIComponent).join(","));
   for (const [k, v] of Object.entries(extra)) if (v !== undefined) params.set(k, v);
   return params.toString();
 };
@@ -72,6 +76,7 @@ export const api = {
   },
   categories: () => request<CategoryDto[]>("GET", "/categories"),
   categoryOrder: () => request<string[]>("GET", "/category-order"),
+  accounts: () => request<AccountDto[]>("GET", "/accounts"),
   report: (q: ReportQuery, signal?: AbortSignal) =>
     request<ReportData>("GET", `/reports/${encodeURIComponent(q.reportId)}/data?${qs(q)}`, undefined, signal),
   transactions: (q: ReportQuery, cursor: string | null, signal?: AbortSignal, limit = 60) =>

@@ -15,9 +15,13 @@ class ParamList implements Params {
   };
 }
 
-/** WHERE clause for drill level `level`: dates, the report's base filter, the taps above. */
+/**
+ * WHERE clause for drill level `level`: dates, the accounts, the report's base filter, the
+ * taps above.
+ */
 function whereFor(report: ReportDefinition, ctx: ReportContext, level: number, params: Params): string {
   const parts = ["t.date BETWEEN $1::date AND $2::date", `(${report.baseFilter})`];
+  if (ctx.accounts) parts.push(`t.account_id = ANY(${params.p(ctx.accounts)}::text[])`);
   ctx.path.slice(0, level).forEach((key, i) => parts.push(`(${report.levels[i]!.filter(key, params)})`));
   return parts.join(" AND ");
 }

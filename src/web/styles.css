@@ -252,10 +252,19 @@ a {
 
 /* --- Date range: a Bootstrap button group ---------------------------------------------- */
 
+/* The range bar and the account filter share a line where they fit (a tablet, a desktop),
+   and wrap onto two on a phone. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem 0.75rem 0.25rem;
+}
 .range-bar {
   display: flex;
+  min-width: 0;
   overflow-x: auto;
-  padding: 0.75rem 0.75rem 0.25rem;
   scrollbar-width: none;
 }
 .range-bar::-webkit-scrollbar {
@@ -323,6 +332,48 @@ a {
   .custom-range input {
     border-color: var(--border);
   }
+}
+.account-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list {
+  list-style: none;
+  max-width: 32rem;
+  margin: 0.25rem 0.75rem 0;
+  padding: 0.25rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.account-list li {
+  display: flex;
+  align-items: center;
+}
+.account-list label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+}
+.account-list input {
+  margin: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+}
+.account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-only {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
 }
 
 /* --- Boxes ------------------------------------------------------------------------------- */

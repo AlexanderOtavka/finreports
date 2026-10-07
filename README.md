@@ -25,6 +25,11 @@ chart's range and drill path (it says which, under the bar). In a transaction, t
 name searches the list for that merchant, in place, and "Look up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
 website and location for the merchant, and the ledger's notes and tags, are shown there too.
 
+Every report counts all accounts until you check only some of them (the button by the date
+range), to see one credit card's spending or leave one out. The choice is kept in the URL
+(`accounts=…`) and sticks through report tabs, ranges, drill-downs and the back button; only
+loading a URL without it shows all accounts again.
+
 A category keeps its color in every chart, range and drill level: the eight biggest
 top-level categories of all time take the eight palette hues, in order (the smaller ones are
 gray and fold into "Other"). Subcategories and merchants are shades of their category's hue.
@@ -141,7 +146,7 @@ Reports are code: one file per report in `src/reports/`.
 `report_txn` has `id, date, amount` (signed, negative is money out), `spend` (money out as a
 positive number, refunds negative, zero for transfers and income), `type, pending, merchant,
 description, account_name, category_id, provenance, top_id, top_name, leaf_id, leaf_name,
-kind, merchant_key`. The breadcrumb, the transaction list under the chart, and the recategorize sheet come
+kind, merchant_key, account_id`. The breadcrumb, the transaction list under the chart, and the recategorize sheet come
 with every report; nothing else needs touching.
 
 ## Configuration
@@ -221,7 +226,8 @@ Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categoriz
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the
 exported `decision_event` rows and their snapshot → the monthly report → a month → a
 merchant → its transaction's website, location and "Look up" → tap the merchant's name: the
-list searches for it, with the drill path and range kept, then a year of it → dark mode. Any console
+list searches for it, with the drill path and range kept, then a year of it → dark mode → only some accounts
+(kept through tabs, ranges, links and the back button). Any console
 error, page error, failed request, or HTTP error fails it. Screenshots of every step land in
 `smoke-output/<viewport>/` (gitignored): look at them. `SMOKE_VIEWPORTS=phone` limits the run;
 `CHROMIUM_PATH` picks the browser. `nix flake check` runs it too, in the build sandbox, and CI

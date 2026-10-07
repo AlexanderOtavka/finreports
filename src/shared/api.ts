@@ -35,6 +35,12 @@ export interface TxnDto {
   provenance: string;
 }
 
+/** An account transactions move money in or out of (an asset account, in Firefly's terms). */
+export interface AccountDto {
+  id: string;
+  name: string;
+}
+
 export interface Breadcrumb {
   key: string | null;
   label: string;

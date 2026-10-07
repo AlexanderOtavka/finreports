@@ -5,7 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { z } from "zod";
 import { findReport, REPORTS } from "../reports/index.js";
-import type { SessionDto } from "../shared/api.js";
+import type { AccountDto, SessionDto } from "../shared/api.js";
 import { recategorize, suggestions } from "./actions.js";
 import type { BackendAdapter } from "./adapters/types.js";
 import { registerAuth } from "./auth.js";
@@ -26,6 +26,7 @@ const reportQuery = z.object({
   from: isoDate,
   to: isoDate,
   path: z.string().max(400).optional(),
+  accounts: z.string().max(2000).optional(),
 });
 const pageQuery = reportQuery.extend({
   cursor: z.string().max(40).optional(),
@@ -62,6 +63,16 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 }
 
 const splitPath = (raw: string | undefined): string[] => (raw ? raw.split("/").filter(Boolean).map(decodeURIComponent) : []);
+/** `accounts=a,b` limits a report to those accounts; without it, all of them. */
+const splitAccounts = (raw: string | undefined): string[] | null =>
+  raw === undefined ? null : raw.split(",").filter(Boolean).map(decodeURIComponent);
+
+const reportContext = (q: z.infer<typeof reportQuery>) => ({
+  from: q.from,
+  to: q.to,
+  path: splitPath(q.path),
+  accounts: splitAccounts(q.accounts),
+});
 
 export interface AppDeps {
   config: Config;
@@ -123,20 +134,31 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
     const report = findReport(req.params.id);
     if (!report) throw new HttpError(404, "no such report");
     const q = parse(reportQuery, req.query);
-    return runReport(db, report, { from: q.from, to: q.to, path: splitPath(q.path) });
+    return runReport(db, report, reportContext(q));
   });
 
   app.get<{ Params: { id: string } }>(`${BASE}/api/reports/:id/transactions`, async (req) => {
     const report = findReport(req.params.id);
     if (!report) throw new HttpError(404, "no such report");
     const q = parse(pageQuery, req.query);
-    return reportTransactions(db, report, { from: q.from, to: q.to, path: splitPath(q.path) }, {
+    return reportTransactions(db, report, reportContext(q), {
       cursor: q.cursor ?? null,
       limit: q.limit,
     });
   });
 
   app.get(`${BASE}/api/categories`, async () => listCategories(db));
+
+  // The accounts behind the mirrored transactions, named as in their latest one: the choices
+  // of the account filter.
+  app.get(`${BASE}/api/accounts`, async (): Promise<AccountDto[]> => {
+    const res = await db.query<AccountDto>(
+      `SELECT account_id AS id, (array_agg(coalesce(account_name, account_id) ORDER BY date DESC, id DESC))[1] AS name
+       FROM txn WHERE deleted_at IS NULL AND account_id IS NOT NULL
+       GROUP BY account_id ORDER BY 2, 1`,
+    );
+    return res.rows;
+  });
 
   // Top-level categories by all-time spending, biggest first: the order the web app hands out
   // category hues in, so a category keeps its color in every chart and date range.

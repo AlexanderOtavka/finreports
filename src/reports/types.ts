@@ -14,6 +14,8 @@ export interface ReportContext {
   to: string;
   /** Keys tapped so far, one per drill level. */
   path: string[];
+  /** Only transactions in these accounts (`report_txn.account_id`); absent or null for all. */
+  accounts?: string[] | null;
 }
 
 /** Collects bind parameters: `p(value)` returns the placeholder (`$3`) for `value`. */
