@@ -461,12 +461,131 @@ a {
   overflow: hidden;
 }
 .section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-size: 1.2rem;
   font-weight: 400;
   color: var(--text);
   margin: 0;
   padding: 0.6rem 0.75rem 0.55rem;
   border-bottom: 1px solid var(--border-soft);
+}
+
+/* --- Transaction search: an icon that opens into a bar, in place ----------------------- */
+
+.txn-search-open {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  margin: -0.3rem -0.35rem -0.3rem 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.txn-search-open:hover,
+.txn-search-open:focus-visible {
+  background: var(--hover);
+  color: var(--accent);
+}
+.txns.searching .txns-head {
+  border-bottom: 1px solid var(--border-soft);
+}
+.txn-search {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.5rem 0.25rem 0.75rem;
+  animation: grow 0.15s ease-out;
+  transform-origin: right center;
+}
+@keyframes grow {
+  from {
+    opacity: 0;
+    transform: scaleX(0.6);
+  }
+}
+.txn-search-icon {
+  display: grid;
+  color: var(--accent);
+  margin-right: 0.25rem;
+}
+.txn-search-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  /* 16px keeps iOS from zooming in on focus. */
+  font-size: max(1rem, 16px);
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d2d6de;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+.txn-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.txn-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .txn-search-input {
+    border-color: var(--border);
+  }
+}
+.txn-search-close {
+  flex: none;
+  border: 0;
+  background: none;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  opacity: 0.35;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+}
+.txn-search-close:hover {
+  opacity: 0.6;
+}
+.txn-search-status {
+  margin: 0;
+  padding: 0 0.75rem 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+.txn-search-scope {
+  color: var(--text-2);
+  font-weight: 700;
+}
+.txn-list mark {
+  background: #fde68a;
+  color: inherit;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fde68a;
+}
+@media (prefers-color-scheme: dark) {
+  .txn-list mark {
+    background: #7a5d12;
+    box-shadow: 0 0 0 1px #7a5d12;
+    color: #fff4cc;
+  }
+}
+.txn-hit {
+  font-size: 0.78rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.txn-hit-label {
+  font-weight: 700;
 }
 .txn-list {
   list-style: none;
@@ -647,9 +766,67 @@ a {
   margin: 0;
   font-size: 1.3rem;
   font-weight: 400;
+}
+.sheet-merchant {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.sheet-merchant-link {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--link);
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sheet-merchant-link:hover,
+.sheet-merchant-link:focus-visible {
+  text-decoration: underline;
+}
+.sheet-lookup {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--btn);
+  color: var(--btn-ink);
+  position: relative;
+  top: -0.15rem;
+}
+.sheet-lookup:hover,
+.sheet-lookup:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sheet-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.1rem 0.6rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+.sheet-details dt {
+  color: var(--text-3);
+}
+.sheet-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet-tag {
+  display: inline-block;
+  margin-right: 0.3rem;
 }
 .sheet-amount {
   font-size: 1.1rem;

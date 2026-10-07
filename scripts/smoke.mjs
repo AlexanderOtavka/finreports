@@ -2,9 +2,10 @@
 /**
  * Headless-browser smoke test of the real server: BACKEND=sample, a throwaway PostgreSQL,
  * the dev auth bypass, and Chromium driven by playwright-core, at a phone and a desktop
- * viewport. It walks the whole flow (load → tap a slice → subcategories and filtered list →
- * tap a subcategory → open a transaction → recategorize → "always" rule → preview → apply →
- * chart and list update → decision log export) and fails on any console error, page error,
+ * viewport. It walks the whole flow (load → search the transactions → tap a slice →
+ * subcategories and filtered list → tap a subcategory → open a transaction → recategorize →
+ * "always" rule → preview → apply → chart and list update → decision log export → a merchant's
+ * transactions from the sheet) and fails on any console error, page error,
  * failed request, or HTTP error. Screenshots of every step go to smoke-output/<viewport>/.
  *
  * Needs: a build (`npm run build`), initdb/pg_ctl and chromium on PATH, e.g.
@@ -170,10 +171,12 @@ async function runFlow(name, options, chromiumPath, pg) {
       if (res.status() >= 400) problems.push(`HTTP ${res.status()}: ${res.url()}`);
     });
     let step = 0;
-    const shot = async (label) => {
+    const shot = async (label, { fullPage = false } = {}) => {
       step += 1;
+      // A full page is drawn from the top; scrolled, the sticky top bar lands mid-page.
+      if (fullPage) await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(450); // let chart animations settle
-      await page.screenshot({ path: join(shots, `${String(step).padStart(2, "0")}-${label}.png`), fullPage: false });
+      await page.screenshot({ path: join(shots, `${String(step).padStart(2, "0")}-${label}.png`), fullPage });
     };
     const crumbs = () => page.getByTestId("breadcrumbs").innerText();
     const range = async () => {
@@ -181,6 +184,15 @@ async function runFlow(name, options, chromiumPath, pg) {
       return { from: await label.getAttribute("data-from"), to: await label.getAttribute("data-to") };
     };
     const urlParams = () => Object.fromEntries(new URL(page.url()).searchParams);
+    const txnTexts = () => page.getByTestId("txn").allInnerTexts();
+    // Search loads every transaction in the selection first; then the count is final.
+    const searched = async () => {
+      await page.waitForFunction(() => {
+        const status = document.querySelector("[data-testid=txn-search-status]")?.textContent ?? "";
+        return status && !status.includes("oading");
+      });
+      return Number((await page.getByTestId("txn-search-count").innerText()).replace(/,/g, ""));
+    };
 
     // 1. Load: the donut and the ranked list render.
     await page.goto(`${server.base}/reports/`);
@@ -213,6 +225,40 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("ranked-row").first().waitFor();
     await shot("load");
 
+    // 1b. Search the transactions: the icon opens a search bar; every word has to match some
+    //     field (merchant, date, category, amount, description, notes, tags…), and the matches
+    //     are highlighted.
+    const listTotal = Number((await page.locator(".section-title .muted").innerText()).replace(/\D/g, ""));
+    await page.getByTestId("txn-search-open").click();
+    await page.getByTestId("txn-search").waitFor();
+    assert(await page.getByTestId("txn-search").evaluate((el) => el === document.activeElement), "the search bar has focus");
+    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=txn]").length === n, listTotal);
+    await shot("search-open");
+    await page.getByTestId("txn-search").fill("trader");
+    const traders = await searched();
+    assert(traders > 5 && traders < listTotal, `"trader" narrows the list (${traders} of ${listTotal})`);
+    assert((await txnTexts()).every((t) => t.includes("Trader Joe")), "every result is Trader Joe's");
+    assert((await page.locator("[data-testid=txn] mark").first().innerText()).toLowerCase() === "trader", "the match is highlighted");
+    // A merchant and a month (the oldest, a whole one): both have to match.
+    const mon = (await page.locator(".txn-date").last().innerText()).slice(0, 3);
+    await page.getByTestId("txn-search").fill(`trader ${mon.toLowerCase()}`);
+    const tradersInMonth = await searched();
+    assert(tradersInMonth > 0 && tradersInMonth < traders, `"trader ${mon}" narrows it further (${tradersInMonth})`);
+    const days = await page.locator(".txn-date").allInnerTexts();
+    assert(days.every((d) => d.startsWith(mon)), `all on days in ${mon} (${days})`);
+    assert((await txnTexts()).every((t) => t.includes("Trader Joe")), "and all still Trader Joe's");
+    await shot("search-compound", { fullPage: true });
+    // A word the row does not show (the cat's name, in the vet visits' notes): the field it is
+    // in is shown under the row.
+    await page.getByTestId("txn-search").fill("miso");
+    assert((await searched()) > 0, "notes are searchable");
+    const hits = await page.getByTestId("txn-hit").allInnerTexts();
+    assert(hits.length > 0 && hits.every((h) => h.startsWith("Notes") && h.includes("Miso")), `the matching note is shown (${hits})`);
+    await shot("search-hidden-field", { fullPage: true });
+    await page.getByTestId("txn-search").press("Escape");
+    await page.getByTestId("txn-search-open").waitFor();
+    await page.evaluate(() => window.scrollTo(0, 0));
+
     // 2. Tap the Transportation slice: subcategories and a filtered list.
     const r = await range();
     await tapSlice(page, server.base, { reportId: "spending-by-category", params: { ...r } }, "transportation", !!options.hasTouch);
@@ -239,6 +285,11 @@ async function runFlow(name, options, chromiumPath, pg) {
     await eats.click();
     await page.getByTestId("sheet").waitFor();
     await page.getByTestId("suggestion").first().waitFor();
+    // The merchant's name searches for it; next to it, a web search for who they are.
+    const lookup = page.getByTestId("merchant-lookup");
+    assert((await lookup.getAttribute("href")) === "https://duckduckgo.com/?q=Uber%20Eats", `look up links to DuckDuckGo (${await lookup.getAttribute("href")})`);
+    assert((await lookup.getAttribute("target")) === "_blank", "look up opens a new tab");
+    assert((await page.getByTestId("txn-details").innerText()).includes("ubereats.com"), "the sheet shows the merchant's website");
     await shot("sheet");
 
     // 5. Pick Restaurants via search, toggle "always", wait for the preview count.
@@ -325,11 +376,55 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.waitForFunction((m) => [...document.querySelectorAll("[data-testid=txn]")].every((el) => el.textContent?.includes(m)), merchantName);
     await shot("merchant");
 
-    // 11. Dark mode renders too.
+    // 10b. Back to all the restaurants (tap the selected merchant again), and open a transaction
+    //      from one of them: Plaid's website and location for the merchant. Tap the merchant's
+    //      name: the sheet closes and the list below the chart searches for that merchant. The
+    //      chart, its drill path and the range stay as they were.
+    await top.click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=ranked-row].selected"));
+    // A sit-down restaurant: Plaid has where it is. Its showing up means the list has reloaded.
+    const other = page
+      .locator("[data-testid=txn]", { hasText: /Lucali|Roberta's|Olmsted|Fonda|Miriam|Shake Shack|Sweetgreen/ })
+      .filter({ hasNotText: merchantName })
+      .first();
+    await other.waitFor();
+    const restaurantsUrl = page.url();
+    const restaurantsRows = await page.getByTestId("ranked-row").count();
+    const restaurantsTotal = Number((await page.locator(".section-title .muted").innerText()).replace(/\D/g, ""));
+    await other.click();
+    await page.getByTestId("sheet").waitFor();
+    const otherName = await page.getByTestId("merchant-search").innerText();
+    const details = await page.getByTestId("txn-details").innerText();
+    assert(details.includes("Website") && details.includes("Location"), `the sheet shows the website and location (${details})`);
+    assert((await page.getByTestId("txn-location").getAttribute("href")).startsWith("https://www.openstreetmap.org/?mlat="), "location links to a map");
+    await shot("sheet-details");
+    await page.getByTestId("merchant-search").click();
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
+    assert((await page.getByTestId("txn-search").inputValue()) === `"${otherName}"`, "the search is the merchant's name");
+    const inRestaurants = await searched();
+    assert(inRestaurants > 0 && inRestaurants < restaurantsTotal, `the list narrows to ${otherName} (${inRestaurants} of ${restaurantsTotal})`);
+    assert((await txnTexts()).every((t) => t.includes(otherName)), `every result is ${otherName}`);
+    assert(page.url() === restaurantsUrl, `the drill path and range stay (${page.url()})`);
+    assert((await crumbs()).includes("Restaurants"), "the breadcrumb still says Restaurants");
+    assert((await page.getByTestId("ranked-row").count()) === restaurantsRows, "the chart still lists every restaurant");
+    assert((await page.getByTestId("txn-search-scope").innerText()).startsWith("Restaurants · "), "the search says what it is within");
+    await shot("merchant-search", { fullPage: true });
+    // The chart's own controls still narrow or widen what the search looks through.
+    await page.getByTestId("breadcrumbs").getByRole("button", { name: "All spending" }).click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=txn-search-scope]")?.textContent?.startsWith("All spending"));
+    const inAll = await searched();
+    assert(inAll >= inRestaurants && (await txnTexts()).every((t) => t.includes(otherName)), `${otherName} across all spending (${inAll})`);
+    await shot("merchant-search-all-spending", { fullPage: true });
+
+    // 11. Dark mode renders too (with the search still open).
     await page.emulateMedia({ colorScheme: "dark" });
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();
     await shot("dark");
+    await page.getByTestId("txn-search").fill("lucali");
+    assert((await searched()) > 0, "dark: search finds Lucali");
+    await page.getByTestId("txn-search").evaluate((el) => el.closest("section").scrollIntoView({ block: "start" }));
+    await shot("dark-search");
 
     await context.close();
   } finally {

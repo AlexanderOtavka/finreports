@@ -43,6 +43,10 @@ interface FireflySplit {
   destination_type?: string | null;
   category_name?: string | null;
   tags?: string[] | null;
+  notes?: string | null;
+  external_url?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
 }
 
 interface FireflyGroup {
@@ -198,6 +202,8 @@ export class FireflyAdapter implements BackendAdapter {
     const payee = counterparty && !NO_PAYEE.has(counterparty.toLowerCase()) ? counterparty : null;
     const plaid = this.plaidFromTags(split.tags ?? [], split.category_name ?? null);
     const category = split.category_name?.trim() ? split.category_name.trim() : null;
+    const lat = split.latitude == null ? NaN : Number(split.latitude);
+    const lon = split.longitude == null ? NaN : Number(split.longitude);
     return {
       externalId: String(split.transaction_journal_id),
       groupId: String(group.id),
@@ -213,6 +219,12 @@ export class FireflyAdapter implements BackendAdapter {
       accountId: accountId === null ? null : String(accountId),
       accountName,
       counterparty,
+      // The Plaid connector writes the merchant's website as the external URL, and Plaid's
+      // location as the latitude and longitude.
+      website: /^https?:\/\//i.test(split.external_url ?? "") ? split.external_url! : null,
+      location: Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0) ? { lat, lon } : null,
+      notes: split.notes?.trim() ? split.notes.trim() : null,
+      tags: (split.tags ?? []).filter((t) => !t.startsWith(this.tagPrefix)),
       plaid,
       category,
       categoryFromPlaid: plaid !== null && category !== null && category === primaryName(plaid.primary),

@@ -12,7 +12,15 @@ interface Props {
   uiContext: UiContext;
   onClose(): void;
   onSave(req: RecategorizeRequest): void;
+  /** Show every transaction from this transaction's merchant. */
+  onSearchMerchant(txn: TxnDto): void;
 }
+
+/** A web search for the merchant, to work out who an unfamiliar one is. */
+export const lookUpUrl = (merchant: string): string => `https://duckduckgo.com/?q=${encodeURIComponent(merchant)}`;
+
+const mapUrl = ({ lat, lon }: { lat: number; lon: number }): string =>
+  `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`;
 
 function plaidLabel(primary: string | null, detailed: string | null): string | null {
   if (!primary) return null;
@@ -26,7 +34,7 @@ function plaidLabel(primary: string | null, detailed: string | null): string | n
  * "Always categorize <merchant> as X" toggle with a live count of the past transactions it
  * would change.
  */
-export function RecategorizeSheet({ txn, categories, uiContext, onClose, onSave }: Props) {
+export function RecategorizeSheet({ txn, categories, uiContext, onClose, onSave, onSearchMerchant }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<SuggestionsDto | null>(null);
@@ -126,7 +134,30 @@ export function RecategorizeSheet({ txn, categories, uiContext, onClose, onSave 
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-header">
           <div className="sheet-title-row">
-            <h2 id="sheet-title">{merchant}</h2>
+            <h2 id="sheet-title" className="sheet-merchant">
+              <button
+                type="button"
+                className="sheet-merchant-link"
+                onClick={() => onSearchMerchant(txn)}
+                title={`All transactions from ${merchant}`}
+                data-testid="merchant-search"
+              >
+                {merchant}
+              </button>
+              <a
+                className="sheet-lookup"
+                href={lookUpUrl(merchant)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Look up ${merchant} on DuckDuckGo`}
+                data-testid="merchant-lookup"
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+                  <path d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Look up
+              </a>
+            </h2>
             <span className={`sheet-amount ${txn.type === "transfer" ? "transfer" : txn.amount > 0 ? "inflow" : "outflow"}`}>
               {txn.amount > 0 ? "+" : ""}
               {formatMoney(Math.abs(txn.amount))}
@@ -140,6 +171,54 @@ export function RecategorizeSheet({ txn, categories, uiContext, onClose, onSave 
           <p className="sheet-raw" title="Description from the bank">
             {txn.description}
           </p>
+          {(txn.counterparty || txn.website || txn.location || txn.notes || txn.tags.length > 0) && (
+            <dl className="sheet-details" data-testid="txn-details">
+              {txn.counterparty && (
+                <>
+                  <dt>Payee</dt>
+                  <dd>{txn.counterparty}</dd>
+                </>
+              )}
+              {txn.website && (
+                <>
+                  <dt>Website</dt>
+                  <dd>
+                    <a href={txn.website} target="_blank" rel="noopener noreferrer">
+                      {txn.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                    </a>
+                  </dd>
+                </>
+              )}
+              {txn.location && (
+                <>
+                  <dt>Location</dt>
+                  <dd>
+                    <a href={mapUrl(txn.location)} target="_blank" rel="noopener noreferrer" data-testid="txn-location">
+                      Show on map
+                    </a>
+                  </dd>
+                </>
+              )}
+              {txn.notes && (
+                <>
+                  <dt>Notes</dt>
+                  <dd className="sheet-notes">{txn.notes}</dd>
+                </>
+              )}
+              {txn.tags.length > 0 && (
+                <>
+                  <dt>Tags</dt>
+                  <dd>
+                    {txn.tags.map((t) => (
+                      <span key={t} className="prov sheet-tag">
+                        {t}
+                      </span>
+                    ))}
+                  </dd>
+                </>
+              )}
+            </dl>
+          )}
           <p className="sheet-now">
             Now <strong>{categories.path(txn.categoryId)}</strong>
             {plaid && <span className="muted"> · Plaid said {plaid}</span>}

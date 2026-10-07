@@ -110,6 +110,20 @@ describe("sync edge cases", async () => {
   const adapter = new ScriptedAdapter();
   const sync = new SyncService(db, adapter, silentLog, { intervalMs: 1000, fullIntervalMs: 86_400_000 });
 
+  it("keeps the merchant's website and location and the ledger's notes and tags", async () => {
+    const details = { website: "https://lucali.com", location: { lat: 40.6818, lon: -73.9998 }, notes: "Birthday", tags: ["date-night"] };
+    adapter.next = { txns: [txn({ externalId: "d1", pending: false, ...details })], removed: [], cursor: "c0", completeFrom: null };
+    await sync.run();
+    const row = await db.query("SELECT website, latitude, longitude, notes, tags FROM txn WHERE external_id = 'd1'");
+    expect(row.rows[0]).toEqual({ website: "https://lucali.com", latitude: 40.6818, longitude: -73.9998, notes: "Birthday", tags: ["date-night"] });
+    // The same again is no change; new tags are.
+    expect(await sync.run()).toMatchObject({ inserted: 0, updated: 0 });
+    adapter.next = { ...adapter.next, txns: [txn({ externalId: "d1", pending: false, ...details, tags: ["date-night", "split"] })] };
+    expect(await sync.run()).toMatchObject({ updated: 1 });
+    expect((await db.query("SELECT tags FROM txn WHERE external_id = 'd1'")).rows[0]).toEqual({ tags: ["date-night", "split"] });
+    await db.query("DELETE FROM txn WHERE external_id = 'd1'");
+  });
+
   it("creates categories the backend invented", async () => {
     adapter.next = { txns: [txn({ externalId: "k1", category: "Kids", categoryFromPlaid: false, pending: false })], removed: [], cursor: "c1", completeFrom: null };
     await sync.run();

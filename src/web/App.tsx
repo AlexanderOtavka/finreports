@@ -82,6 +82,7 @@ export function App() {
   const [showAllRows, setShowAllRows] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [search, setSearch] = useState<string | null>(null);
   const dark = useDarkMode();
   const colors = useRef(new ColorMemory());
 
@@ -161,11 +162,11 @@ export function App() {
     return () => ctl.abort();
   }, [session, view, refreshTick]);
 
-  const loadMore = useCallback(() => {
+  const loadMore = useCallback((limit?: number) => {
     if (!cursor || txnLoading) return;
     setTxnLoading(true);
     api
-      .transactions(view, cursor)
+      .transactions(view, cursor, undefined, limit)
       .then((page) => {
         setTxns((prev) => [...prev, ...page.items.filter((t) => !prev.some((p) => p.id === t.id))]);
         setCursor(page.nextCursor);
@@ -176,6 +177,12 @@ export function App() {
         setToast({ id: Date.now(), text: err.message, error: true });
       });
   }, [cursor, txnLoading, view]);
+
+  // Search runs in the browser, over every transaction in the selection: while it is open,
+  // load the rest in big pages.
+  useEffect(() => {
+    if (search !== null && cursor && !txnLoading) loadMore(500);
+  }, [search, cursor, txnLoading, loadMore]);
 
   useEffect(() => {
     if (!toast) return;
@@ -266,6 +273,13 @@ export function App() {
   );
 
   const closeSheet = useCallback(() => setOpenTxn(null), []);
+
+  // The merchant's name in the sheet: that merchant's transactions within the current range
+  // and drill path, which stay as they are, chart and all.
+  const searchMerchant = useCallback((txn: TxnDto) => {
+    setOpenTxn(null);
+    setSearch(`"${txn.merchant}"`);
+  }, []);
 
   // --- Rendering -------------------------------------------------------------------------
 
@@ -457,6 +471,9 @@ export function App() {
           hasMore={cursor !== null}
           categories={categories}
           flash={flash}
+          search={search}
+          scope={`${data?.breadcrumbs.at(-1)?.label ?? report.rootLabel} · ${formatRange(view.from, view.to)}`}
+          onSearch={setSearch}
           onLoadMore={loadMore}
           onOpen={setOpenTxn}
         />
@@ -465,7 +482,14 @@ export function App() {
       </div>
 
       {openTxn && categories && (
-        <RecategorizeSheet txn={openTxn} categories={categories} uiContext={uiContext} onClose={closeSheet} onSave={onSave} />
+        <RecategorizeSheet
+          txn={openTxn}
+          categories={categories}
+          uiContext={uiContext}
+          onClose={closeSheet}
+          onSave={onSave}
+          onSearchMerchant={searchMerchant}
+        />
       )}
 
       {toast && (
