@@ -458,9 +458,7 @@ a {
 
 .txns {
   margin-top: 1rem;
-  scroll-margin-top: var(--topbar-h, 0);
-  /* Clips like hidden, but lets the search bar stick. */
-  overflow: clip;
+  overflow: hidden;
 }
 .section-title {
   display: flex;
@@ -475,7 +473,7 @@ a {
   border-bottom: 1px solid var(--border-soft);
 }
 
-/* --- Transaction search: an icon that opens into a bar, stuck under the top bar --------- */
+/* --- Transaction search: an icon that opens into a bar, in place ----------------------- */
 
 .txn-search-open {
   flex: none;
@@ -495,16 +493,8 @@ a {
   background: var(--hover);
   color: var(--accent);
 }
-/* Room for a screenful, so the bar stays put as the results shrink. */
-.txns.searching {
-  min-height: calc(100vh - var(--topbar-h, 0px) - 1rem);
-}
 .txns.searching .txns-head {
-  position: sticky;
-  top: var(--topbar-h, 0);
-  z-index: 2;
-  background: var(--surface);
-  box-shadow: 0 1px 0 var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
 }
 .txn-search {
   display: flex;
@@ -569,6 +559,10 @@ a {
   padding: 0 0.75rem 0.4rem;
   font-size: 0.8rem;
   color: var(--text-3);
+}
+.txn-search-scope {
+  color: var(--text-2);
+  font-weight: 700;
 }
 .txn-list mark {
   background: #fde68a;

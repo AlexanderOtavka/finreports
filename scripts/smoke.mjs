@@ -171,10 +171,12 @@ async function runFlow(name, options, chromiumPath, pg) {
       if (res.status() >= 400) problems.push(`HTTP ${res.status()}: ${res.url()}`);
     });
     let step = 0;
-    const shot = async (label) => {
+    const shot = async (label, { fullPage = false } = {}) => {
       step += 1;
+      // A full page is drawn from the top; scrolled, the sticky top bar lands mid-page.
+      if (fullPage) await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(450); // let chart animations settle
-      await page.screenshot({ path: join(shots, `${String(step).padStart(2, "0")}-${label}.png`), fullPage: false });
+      await page.screenshot({ path: join(shots, `${String(step).padStart(2, "0")}-${label}.png`), fullPage });
     };
     const crumbs = () => page.getByTestId("breadcrumbs").innerText();
     const range = async () => {
@@ -245,14 +247,14 @@ async function runFlow(name, options, chromiumPath, pg) {
     const days = await page.locator(".txn-date").allInnerTexts();
     assert(days.every((d) => d.startsWith(mon)), `all on days in ${mon} (${days})`);
     assert((await txnTexts()).every((t) => t.includes("Trader Joe")), "and all still Trader Joe's");
-    await shot("search-compound");
+    await shot("search-compound", { fullPage: true });
     // A word the row does not show (the cat's name, in the vet visits' notes): the field it is
     // in is shown under the row.
     await page.getByTestId("txn-search").fill("miso");
     assert((await searched()) > 0, "notes are searchable");
     const hits = await page.getByTestId("txn-hit").allInnerTexts();
     assert(hits.length > 0 && hits.every((h) => h.startsWith("Notes") && h.includes("Miso")), `the matching note is shown (${hits})`);
-    await shot("search-hidden-field");
+    await shot("search-hidden-field", { fullPage: true });
     await page.getByTestId("txn-search").press("Escape");
     await page.getByTestId("txn-search-open").waitFor();
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -374,32 +376,44 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.waitForFunction((m) => [...document.querySelectorAll("[data-testid=txn]")].every((el) => el.textContent?.includes(m)), merchantName);
     await shot("merchant");
 
-    // 10b. Open one of its transactions: Plaid's website and location for the merchant. Tap the
-    //      merchant's name: the sheet closes and the list searches for that merchant, across
-    //      every category in the range.
-    await page.getByTestId("txn").first().click();
+    // 10b. Back to all the restaurants (tap the selected merchant again), and open a transaction
+    //      from one of them: Plaid's website and location for the merchant. Tap the merchant's
+    //      name: the sheet closes and the list below the chart searches for that merchant. The
+    //      chart, its drill path and the range stay as they were.
+    await top.click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=ranked-row].selected"));
+    const restaurantsUrl = page.url();
+    const restaurantsRows = await page.getByTestId("ranked-row").count();
+    const restaurantsTotal = (await txnTexts()).length;
+    // A sit-down restaurant: Plaid has where it is.
+    const other = page
+      .locator("[data-testid=txn]", { hasText: /Lucali|Roberta's|Olmsted|Fonda|Miriam|Shake Shack|Sweetgreen/ })
+      .filter({ hasNotText: merchantName })
+      .first();
+    await other.click();
     await page.getByTestId("sheet").waitFor();
+    const otherName = await page.getByTestId("merchant-search").innerText();
     const details = await page.getByTestId("txn-details").innerText();
     assert(details.includes("Website") && details.includes("Location"), `the sheet shows the website and location (${details})`);
     assert((await page.getByTestId("txn-location").getAttribute("href")).startsWith("https://www.openstreetmap.org/?mlat="), "location links to a map");
     await shot("sheet-details");
     await page.getByTestId("merchant-search").click();
     await page.getByTestId("sheet").waitFor({ state: "detached" });
-    assert((await page.getByTestId("txn-search").inputValue()) === `"${merchantName}"`, "the search is the merchant's name");
-    await page.waitForFunction(() => !new URL(location.href).searchParams.has("p"));
-    assert((await crumbs()).trim() === "All spending", `the drill path is cleared (${await crumbs()})`);
-    const inMonth = await searched();
-    assert(inMonth > 0, "the merchant has transactions");
-    assert((await txnTexts()).every((t) => t.includes(merchantName)), `every result is ${merchantName}`);
-    await shot("merchant-search");
-    // The search stays as the range changes: a year of that merchant.
-    await page.getByTestId("range-12m").click();
-    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "12m");
-    await page.waitForFunction((n) => Number(document.querySelector("[data-testid=txn-search-count]")?.textContent?.replace(/,/g, "")) > n, inMonth);
-    const inYear = await searched();
-    assert((await txnTexts()).every((t) => t.includes(merchantName)), `all ${inYear} results in the year are ${merchantName}`);
-    await page.getByTestId("txn-search").evaluate((el) => el.closest("section").scrollIntoView({ block: "start" }));
-    await shot("merchant-search-year");
+    assert((await page.getByTestId("txn-search").inputValue()) === `"${otherName}"`, "the search is the merchant's name");
+    const inRestaurants = await searched();
+    assert(inRestaurants > 0 && inRestaurants < restaurantsTotal, `the list narrows to ${otherName} (${inRestaurants} of ${restaurantsTotal})`);
+    assert((await txnTexts()).every((t) => t.includes(otherName)), `every result is ${otherName}`);
+    assert(page.url() === restaurantsUrl, `the drill path and range stay (${page.url()})`);
+    assert((await crumbs()).includes("Restaurants"), "the breadcrumb still says Restaurants");
+    assert((await page.getByTestId("ranked-row").count()) === restaurantsRows, "the chart still lists every restaurant");
+    assert((await page.getByTestId("txn-search-scope").innerText()).startsWith("Restaurants · "), "the search says what it is within");
+    await shot("merchant-search", { fullPage: true });
+    // The chart's own controls still narrow or widen what the search looks through.
+    await page.getByTestId("breadcrumbs").getByRole("button", { name: "All spending" }).click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=txn-search-scope]")?.textContent?.startsWith("All spending"));
+    const inAll = await searched();
+    assert(inAll >= inRestaurants && (await txnTexts()).every((t) => t.includes(otherName)), `${otherName} across all spending (${inAll})`);
+    await shot("merchant-search-all-spending", { fullPage: true });
 
     // 11. Dark mode renders too (with the search still open).
     await page.emulateMedia({ colorScheme: "dark" });

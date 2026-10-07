@@ -20,9 +20,9 @@ match some field (merchant, date as `2026-09-14`, `9/14`, `Sep 14` or `Monday`, 
 amount, the bank's raw description, account, notes, tags, website), so `trader sep` is
 Trader Joe's in September. `"Quoted words"` stay together, and a number is a whole number
 (`20` is the 20th or $20, not 2025). Matches are highlighted; a word found only in a field
-the list does not show (a note, a tag) brings that field up under the row. In a transaction,
-the merchant's name searches for all of that merchant's transactions in the range, and "Look
-up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
+the list does not show (a note, a tag) brings that field up under the row. Search keeps the
+chart's range and drill path (it says which, under the bar). In a transaction, the merchant's
+name searches the list for that merchant, in place, and "Look up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
 website and location for the merchant, and the ledger's notes and tags, are shown there too.
 
 A category keeps its color in every chart, range and drill level: the eight biggest
@@ -221,7 +221,7 @@ Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categoriz
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the
 exported `decision_event` rows and their snapshot → the monthly report → a month → a
 merchant → its transaction's website, location and "Look up" → tap the merchant's name: the
-search shows all of its transactions, then a year of them → dark mode. Any console
+list searches for it, with the drill path and range kept, then a year of it → dark mode. Any console
 error, page error, failed request, or HTTP error fails it. Screenshots of every step land in
 `smoke-output/<viewport>/` (gitignored): look at them. `SMOKE_VIEWPORTS=phone` limits the run;
 `CHROMIUM_PATH` picks the browser. `nix flake check` runs it too, in the build sandbox, and CI

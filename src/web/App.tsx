@@ -274,26 +274,12 @@ export function App() {
 
   const closeSheet = useCallback(() => setOpenTxn(null), []);
 
-  // The merchant's name in the sheet: every transaction from that merchant in this range,
-  // whatever its category, so the drill path goes.
-  const searchMerchant = useCallback(
-    (txn: TxnDto) => {
-      setOpenTxn(null);
-      setSearch(`"${txn.merchant}"`);
-      if (view.path.length) navigate({ ...view, path: [] });
-    },
-    [view, navigate],
-  );
-
-  // The sticky search bar sits right under the sticky top bar.
-  const topbar = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const node = topbar.current;
-    if (!node) return;
-    const ro = new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${node.offsetHeight}px`));
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, [fatal]);
+  // The merchant's name in the sheet: that merchant's transactions within the current range
+  // and drill path, which stay as they are, chart and all.
+  const searchMerchant = useCallback((txn: TxnDto) => {
+    setOpenTxn(null);
+    setSearch(`"${txn.merchant}"`);
+  }, []);
 
   // --- Rendering -------------------------------------------------------------------------
 
@@ -311,7 +297,7 @@ export function App() {
 
   return (
     <main className="app">
-      <header className="topbar" ref={topbar}>
+      <header className="topbar">
         <div className="navbar">
           <h1 className="brand">
             <a href="/reports/">
@@ -486,6 +472,7 @@ export function App() {
           categories={categories}
           flash={flash}
           search={search}
+          scope={`${data?.breadcrumbs.at(-1)?.label ?? report.rootLabel} · ${formatRange(view.from, view.to)}`}
           onSearch={setSearch}
           onLoadMore={loadMore}
           onOpen={setOpenTxn}

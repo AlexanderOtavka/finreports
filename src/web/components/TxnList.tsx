@@ -14,6 +14,8 @@ interface Props {
   flash: Set<number>;
   /** The search box's text, or null while it is closed. */
   search: string | null;
+  /** What the list is already narrowed to (the drill path and range), which search keeps. */
+  scope: string;
   onSearch(query: string | null): void;
   onLoadMore(): void;
   onOpen(txn: TxnDto): void;
@@ -45,7 +47,7 @@ function SearchIcon() {
   );
 }
 
-export function TxnList({ items, total, loading, hasMore, categories, flash, search, onSearch, onLoadMore, onOpen }: Props) {
+export function TxnList({ items, total, loading, hasMore, categories, flash, search, scope, onSearch, onLoadMore, onOpen }: Props) {
   const sentinel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const section = useRef<HTMLElement>(null);
@@ -60,15 +62,11 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
   const shown = useMemo(() => (index && terms.length ? index.filter(terms) : items), [index, terms, items]);
   const filtering = searching && terms.length > 0;
 
-  // Opening the search brings the bar up under the top bar, with room for the results below.
-  // Opened empty, it takes the typing; opened with a query (a merchant from the sheet), it
-  // leaves the keyboard down.
+  // The bar opens in place, under the chart. Opened empty, it takes the typing; opened with a
+  // query (a merchant from the sheet), it leaves the keyboard down and the page where it was.
   const wasSearching = useRef(searching);
   useEffect(() => {
-    if (searching && !wasSearching.current) {
-      section.current?.scrollIntoView({ block: "start" });
-      if (!search) input.current?.focus({ preventScroll: true });
-    }
+    if (searching && !wasSearching.current && !search) input.current?.focus();
     wasSearching.current = searching;
   }, [searching, search]);
 
@@ -136,13 +134,14 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
             {filtering ? (
               <>
                 <strong data-testid="txn-search-count">{shown.length.toLocaleString("en-US")}</strong> of {items.length.toLocaleString("en-US")}
-                {hasMore ? `, loading the other ${(total - items.length).toLocaleString("en-US")}…` : ""}
+                {hasMore ? `, loading the other ${(total - items.length).toLocaleString("en-US")}…` : ""} in{" "}
               </>
             ) : hasMore ? (
-              `Loading all ${total.toLocaleString("en-US")} transactions to search…`
+              `Loading all ${total.toLocaleString("en-US")} transactions in `
             ) : (
-              `Search all ${total.toLocaleString("en-US")} transactions. Every word must match; "quote" a phrase.`
+              `Searching all ${total.toLocaleString("en-US")} transactions in `
             )}
+            <span className="txn-search-scope" data-testid="txn-search-scope">{scope}</span>
           </p>
         )}
       </div>
