@@ -382,14 +382,15 @@ async function runFlow(name, options, chromiumPath, pg) {
     //      chart, its drill path and the range stay as they were.
     await top.click();
     await page.waitForFunction(() => !document.querySelector("[data-testid=ranked-row].selected"));
-    const restaurantsUrl = page.url();
-    const restaurantsRows = await page.getByTestId("ranked-row").count();
-    const restaurantsTotal = (await txnTexts()).length;
-    // A sit-down restaurant: Plaid has where it is.
+    // A sit-down restaurant: Plaid has where it is. Its showing up means the list has reloaded.
     const other = page
       .locator("[data-testid=txn]", { hasText: /Lucali|Roberta's|Olmsted|Fonda|Miriam|Shake Shack|Sweetgreen/ })
       .filter({ hasNotText: merchantName })
       .first();
+    await other.waitFor();
+    const restaurantsUrl = page.url();
+    const restaurantsRows = await page.getByTestId("ranked-row").count();
+    const restaurantsTotal = Number((await page.locator(".section-title .muted").innerText()).replace(/\D/g, ""));
     await other.click();
     await page.getByTestId("sheet").waitFor();
     const otherName = await page.getByTestId("merchant-search").innerText();
