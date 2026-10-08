@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OTHER_KEY } from "../reports/category-drilldown.js";
 import { findReport, REPORTS } from "../reports/index.js";
 import type { RangePreset } from "../reports/types.js";
@@ -305,6 +305,17 @@ export function App() {
     setSearch(`"${txn.merchant}"`);
   }, []);
 
+  // The top bar's height (safe area, navbar, tabs) as --topbar-h: the transactions' header
+  // sticks right under it, and the page leaves room to scroll that header up to it.
+  const topbar = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const node = topbar.current;
+    if (!node) return;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${node.getBoundingClientRect().height}px`));
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [fatal]);
+
   // --- Rendering -------------------------------------------------------------------------
 
   if (fatal) {
@@ -321,7 +332,7 @@ export function App() {
 
   return (
     <main className="app">
-      <header className="topbar">
+      <header className="topbar" ref={topbar}>
         <div className="navbar">
           <h1 className="brand">
             <a href={view.accounts ? `/reports/?${new URLSearchParams({ accounts: view.accounts.map(encodeURIComponent).join(",") })}` : "/reports/"}>

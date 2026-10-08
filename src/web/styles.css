@@ -114,6 +114,8 @@ a {
 /* One column up to tablets in portrait, two from 1000px; the tabs line up with it. */
 :root {
   --page-max: 960px;
+  /* Measured by the app; this is the usual navbar and tabs, without a safe area. */
+  --topbar-h: 93px;
 }
 .page {
   max-width: var(--page-max);
@@ -127,6 +129,17 @@ a {
   top: 0;
   z-index: 5;
   box-shadow: var(--shadow);
+}
+/* The navbar's blue goes on up past the top of the page: behind a browser's see-through top
+   bar (Orion), and into the gap when iOS bounces the page down from the top. */
+.topbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 100vh;
+  background: var(--navbar);
 }
 .navbar {
   display: flex;
@@ -507,9 +520,26 @@ a {
 
 /* --- Transactions ------------------------------------------------------------------------ */
 
-.txns {
-  margin-top: 1rem;
-  overflow: hidden;
+/* The list leaves room under it to scroll its header up to the top bar, however few rows a
+   search leaves: the header holds still while the list shrinks under it. */
+.txns-area {
+  margin: 1rem 0.75rem 0;
+  min-height: calc(100vh - var(--topbar-h) - 2rem - env(safe-area-inset-bottom));
+  /* No scroll anchoring on the rows: when a search drops the row Chrome anchored to, it can
+     throw the page back to the top instead of letting it settle with the header up top. */
+  overflow-anchor: none;
+}
+.txns-area .txns {
+  margin: 0;
+  /* clip, not hidden: hidden would make the box a scroller, and the header would not stick. */
+  overflow: clip;
+}
+/* The title or the search bar sticks under the top bar once the list scrolls past it. */
+.txns-head {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 1;
+  background: var(--surface);
 }
 .section-title {
   display: flex;
@@ -1125,12 +1155,12 @@ a {
   }
   .content .chart-card {
     position: sticky;
-    top: 7rem;
+    top: calc(var(--topbar-h) + 0.75rem);
     margin: 0.75rem 0 0;
-    max-height: calc(100vh - 8rem);
+    max-height: calc(100vh - var(--topbar-h) - 1.5rem);
     overflow-y: auto;
   }
-  .content .txns {
+  .content .txns-area {
     margin: 0.75rem 0 0;
   }
   .sheet-handle {
