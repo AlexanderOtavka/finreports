@@ -134,5 +134,10 @@ jobs:
             echo "No open update PR at ${GITHUB_SHA}; nothing to merge."
             exit 0
           fi
+          # The PR also gets a pull_request run that waits for approval, as it was opened by a
+          # bot, and fails once the PR closes. This run stands in for it, so delete it.
+          gh run list --branch automated/update-deps --event pull_request --commit "$GITHUB_SHA" \
+            --json databaseId,conclusion --jq '.[] | select(.conclusion == "action_required") | .databaseId' |
+            xargs -r -n1 gh run delete
           gh pr merge "$pr" --squash --delete-branch
           gh workflow run ci.yml --ref main
