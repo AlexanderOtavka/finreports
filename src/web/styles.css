@@ -525,6 +525,9 @@ a {
 .txns-area {
   margin: 1rem 0.75rem 0;
   min-height: calc(100vh - var(--topbar-h) - 2rem - env(safe-area-inset-bottom));
+  /* No scroll anchoring on the rows: when a search drops the row Chrome anchored to, it can
+     throw the page back to the top instead of letting it settle with the header up top. */
+  overflow-anchor: none;
 }
 .txns-area .txns {
   margin: 0;
