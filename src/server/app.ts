@@ -264,6 +264,12 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
       prefix: `${BASE}/`,
       index: ["index.html"],
       wildcard: true,
+      // No ETag or Last-Modified: both come from size and mtime, and the Nix store pins every
+      // mtime to 1970, so a new index.html of the same length (fingerprinted names are) would
+      // revalidate as 304 and browsers would keep running the build they first cached.
+      // Fingerprinted assets never revalidate, and index.html is small enough to resend.
+      etag: false,
+      lastModified: false,
       setHeaders(reply, path) {
         // Vite fingerprints everything under assets/; the rest (index.html) must revalidate.
         reply.header(
