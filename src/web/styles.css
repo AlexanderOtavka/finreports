@@ -564,6 +564,26 @@ a {
   border-bottom: 1px solid var(--border-soft);
 }
 
+.section-title-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* The net of the transactions listed, and what it is made of. */
+.txn-totals {
+  font-size: 0.8rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.txn-totals strong {
+  font-weight: 700;
+}
+/* Money in − money out: on the same line, or on the next one whole. */
+.txn-totals-parts {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 /* --- Transaction search: an icon that opens into a bar, in place ----------------------- */
 
 .txn-search-open {
