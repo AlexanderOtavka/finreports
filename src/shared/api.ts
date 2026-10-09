@@ -17,6 +17,7 @@ export interface TxnDto {
   merchant: string;
   merchantKey: string;
   description: string;
+  accountId: string | null;
   accountName: string | null;
   /** The payee or payer as the ledger names it, when that differs from `merchant`. */
   counterparty: string | null;
@@ -61,12 +62,6 @@ export interface ReportData {
   canDrill: boolean;
   breadcrumbs: Breadcrumb[];
   rows: ReportRow[];
-  total: number;
-}
-
-export interface TxnPage {
-  items: TxnDto[];
-  nextCursor: string | null;
   total: number;
 }
 

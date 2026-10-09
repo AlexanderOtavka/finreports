@@ -21,43 +21,7 @@ export function useDarkMode(): boolean {
   return dark;
 }
 
-/**
- * Colors follow the entity, not its rank: a key keeps the slot it first got for as long as
- * the view (report + drill level) stays the same, so a recategorization that reorders the
- * slices does not repaint them.
- */
-export class ColorMemory {
-  /** Slot assignments per view, kept so that drilling down and back up repaints nothing. */
-  private views = new Map<string, Map<string, number>>();
-
-  /**
-   * The slot (0-6) of `key` in `view`, or null for rows ranked past `FOLD_AT`, which share the
-   * neutral "everything else" color (charts fold them into one mark) rather than a generated
-   * color. A folded row's slot stays reserved for when it climbs back.
-   */
-  slot(view: string, key: string, index: number): number | null {
-    let slots = this.views.get(view);
-    if (!slots) {
-      slots = new Map();
-      this.views.set(view, slots);
-    }
-    if (index >= FOLD_AT) return null;
-    let slot = slots.get(key);
-    if (slot === undefined) {
-      const used = new Set(slots.values());
-      slot = !used.has(index) ? index : [...Array(FOLD_AT).keys()].find((s) => !used.has(s));
-      if (slot === undefined) return null;
-      slots.set(key, slot);
-    }
-    return slot;
-  }
-
-  colorFor(view: string, key: string, index: number, dark: boolean): string {
-    const slot = this.slot(view, key, index);
-    return slot === null ? foldColor(dark) : (dark ? DARK : LIGHT)[slot]!;
-  }
-}
-
+/** Rows ranked past this many fold into one "everything else" mark, in a neutral color. */
 export const FOLD_AT = 7;
 const foldColor = (dark: boolean) => (dark ? "#5c5b56" : "#b9b8b2");
 
@@ -148,7 +112,11 @@ function fromOklch(L: number, C: number, h: number): string {
 
 // ------------------------------------------------------------------------------------------------
 
-export function chartTheme(dark: boolean, view: string, memory: ColorMemory, categoryOrder: string[]): ChartTheme {
+/**
+ * The theme depends on nothing but its arguments, so a chart is the same for the same data
+ * however the view got there.
+ */
+export function chartTheme(dark: boolean, categoryOrder: string[]): ChartTheme {
   return {
     dark,
     // Firefly III's (AdminLTE's) text and box colors; see styles.css.
@@ -158,12 +126,9 @@ export function chartTheme(dark: boolean, view: string, memory: ColorMemory, cat
     grid: dark ? "#415761" : "#f4f4f4",
     other: foldColor(dark),
     neutral: dark ? "#8f8e88" : "#86857f",
-    colorFor: (key, index) => memory.colorFor(view, key, index, dark),
+    colorFor: (index) => (index < FOLD_AT ? (dark ? DARK : LIGHT)[index]! : foldColor(dark)),
     categoryColor: (topId) => categoryColor(categoryOrder, topId, dark),
-    shadeOf: (base, key, index) => {
-      const slot = memory.slot(view, key, index);
-      return slot === null ? null : shade(base, slot, dark);
-    },
+    shadeOf: (base, index) => (index < FOLD_AT ? shade(base, index, dark) : null),
     formatMoney: formatMoneyShort,
   };
 }

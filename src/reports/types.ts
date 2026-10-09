@@ -1,12 +1,26 @@
 /**
- * The contract every report file implements. A report is code: a query per drill level
- * against the `report_txn` view (the backend-neutral `txn` mirror joined to the category
- * tree), the filter that selects the transactions behind the current selection, and an
- * ECharts option built from the query's rows. The server runs `query`/`transactions`; the
- * web app runs `chart`. Nothing here may import server- or browser-only modules.
+ * The contract every report file implements. A report is code: how to group transactions at
+ * each drill level, which transactions it counts at all, and an ECharts option built from the
+ * grouped rows. The web app holds every transaction and runs all of it (`run.ts`) on every
+ * change of the report, range, accounts or drill path, so a chart is a pure function of
+ * those. Nothing here may import server- or browser-only modules.
  */
 import type { EChartsOption } from "echarts";
-import type { ReportData, ReportRow } from "../shared/api.js";
+import type { ReportData, ReportRow, TxnDto } from "../shared/api.js";
+import type { CategoryKind } from "../shared/taxonomy.js";
+
+/** A transaction as reports see it: with its category's place in the tree, and what it spent. */
+export interface ReportTxn extends TxnDto {
+  /** The top-level category, `uncategorized` for none. */
+  topId: string;
+  topName: string;
+  /** The category itself; a top-level category used directly is named "<name> (unspecified)". */
+  leafId: string;
+  leafName: string;
+  kind: CategoryKind;
+  /** Money out as a positive number, refunds negative, zero for transfers and income. */
+  spend: number;
+}
 
 export interface ReportContext {
   /** Inclusive ISO dates. */
@@ -14,29 +28,21 @@ export interface ReportContext {
   to: string;
   /** Keys tapped so far, one per drill level. */
   path: string[];
-  /** Only transactions in these accounts (`report_txn.account_id`); absent or null for all. */
+  /** Only transactions in these accounts; absent or null for all. */
   accounts?: string[] | null;
-}
-
-/** Collects bind parameters: `p(value)` returns the placeholder (`$3`) for `value`. */
-export interface Params {
-  p(value: unknown): string;
 }
 
 export interface DrillLevel {
   /** Breadcrumb/legend noun for this level, e.g. "Category". */
   name: string;
+  /** The key `txn` files under at this level: tapping that key narrows to the transactions with it. */
+  key(txn: ReportTxn): string;
   /**
-   * SQL returning `key`, `label`, `value` (and any extra columns the chart wants) for this
-   * level. `where` already holds the date range, the report's `baseFilter`, and the filters
-   * of the keys tapped above this level: select `FROM report_txn t WHERE ${where}`.
+   * The rows of this level, `key`, `label`, `value` (and any extra fields the chart wants),
+   * from the report's transactions in the range and accounts under the keys tapped above.
+   * `sumRows` (run.ts) covers the usual "sum the spending per key".
    */
-  query(where: string, ctx: ReportContext, params: Params): string;
-  /**
-   * WHERE condition (over `report_txn`, aliased `t`) for the transactions behind `key` at
-   * this level. ANDed with the conditions of the levels above and the date range.
-   */
-  filter(key: string, params: Params): string;
+  rows(txns: ReportTxn[]): ReportRow[];
 }
 
 export interface ChartTheme {
@@ -49,19 +55,18 @@ export interface ChartTheme {
   other: string;
   /** A gray to shade from where a category has no hue of its own. */
   neutral: string;
-  /** Color for a row key, stable for the lifetime of the current view. */
-  colorFor(key: string, index: number): string;
+  /** Color for the row ranked `index`: the palette in order, `other` past the seventh. */
+  colorFor(index: number): string;
   /**
    * The fixed color of a top-level category, the same in every report, range and drill level;
    * null for the small categories past the eighth hue (draw them as `other`).
    */
   categoryColor(topId: string): string | null;
   /**
-   * A shade of `base` for the row `key` ranked `index`, stable for the lifetime of the
-   * current view; slot 0 is `base` itself. Null for rows ranked past the seventh, which
-   * charts fold into one `other` mark.
+   * A shade of `base` for the row ranked `index`; the first is `base` itself. Null for rows
+   * ranked past the seventh, which charts fold into one `other` mark.
    */
-  shadeOf(base: string, key: string, index: number): string | null;
+  shadeOf(base: string, index: number): string | null;
   formatMoney(value: number): string;
 }
 
@@ -85,9 +90,14 @@ export interface ReportDefinition {
   description: string;
   /** Breadcrumb label of the top level. */
   rootLabel: string;
-  /** Condition every transaction in this report satisfies (e.g. "is spending"). */
-  baseFilter: string;
+  /** Whether the report counts `txn` at all (e.g. "is spending"). */
+  baseFilter(txn: ReportTxn): boolean;
   levels: DrillLevel[];
+  /**
+   * The whole chart, from scratch: the chart shows exactly this option and keeps nothing from
+   * the last one. Series with the same `id` as one already on screen animate to their new
+   * values; a new `id` draws in fresh.
+   */
   chart(data: ReportData, theme: ChartTheme, selectedKey: string | null): EChartsOption;
   /**
    * Instead of drilling, a tap on `key` (in the chart or the ranked list) opens another view,
@@ -103,7 +113,7 @@ export interface ReportDefinition {
   rowLabel?(row: ReportRow): string;
   /**
    * Swatch color of a row in the ranked list; must match the row's mark in the chart.
-   * Defaults to `theme.colorFor(row.key, index)`.
+   * Defaults to `theme.colorFor(index)`.
    */
   rowColor?(data: ReportData, row: ReportRow, index: number, theme: ChartTheme): string;
 }

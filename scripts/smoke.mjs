@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -116,13 +116,27 @@ async function startServer(databaseUrl) {
 }
 
 /**
+ * A report's data as the app computes it: the built report code, over every transaction.
+ * `ctx` is `{ from, to, path }`.
+ */
+async function reportData(page, base, reportId, ctx) {
+  const dist = (file) => import(pathToFileURL(join(root, "dist/server/reports", file)).href);
+  const [{ findReport }, { inScope, runReport, toReportTxn }] = await Promise.all([dist("index.js"), dist("run.js")]);
+  const json = async (path) => (await page.request.get(`${base}/reports/api/${path}`)).json();
+  const [txns, categories] = await Promise.all([json("transactions"), json("categories")]);
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const report = findReport(reportId);
+  return runReport(report, inScope(report, txns.map((t) => toReportTxn(t, byId)), ctx), ctx.path);
+}
+
+/**
  * Taps the donut slice for `key`. ECharts draws on a canvas, so this computes where the slice
  * is: slices run clockwise from 12 o'clock in row order, at radius 52%-82% of half the smaller
  * side. Shown are the categories with a hue (the eight biggest of all time) or, further down,
  * the first seven rows; the rest fold into one slice at the end.
  */
-async function tapSlice(page, base, query, key, touch) {
-  const data = await (await page.request.get(`${base}/reports/api/reports/${query.reportId}/data?${new URLSearchParams(query.params)}`)).json();
+async function tapSlice(page, base, reportId, ctx, key, touch) {
+  const data = await reportData(page, base, reportId, ctx);
   const hued = (await (await page.request.get(`${base}/reports/api/category-order`)).json()).slice(0, 8);
   const isShown = (r, i) => (data.level === 0 ? hued.includes(r.key) : i < 7);
   const shown = data.rows.filter(isShown);
@@ -185,11 +199,11 @@ async function runFlow(name, options, chromiumPath, pg) {
     };
     const urlParams = () => Object.fromEntries(new URL(page.url()).searchParams);
     const txnTexts = () => page.getByTestId("txn").allInnerTexts();
-    // Search loads every transaction in the selection first; then the count is final.
+    // The list filters a frame behind the typing; once it has caught up, the count is final.
     const searched = async () => {
       await page.waitForFunction(() => {
-        const status = document.querySelector("[data-testid=txn-search-status]")?.textContent ?? "";
-        return status && !status.includes("oading");
+        const status = document.querySelector("[data-testid=txn-search-status]");
+        return status && status.getAttribute("data-query") === document.querySelector("[data-testid=txn-search]")?.value;
       });
       return Number((await page.getByTestId("txn-search-count").innerText()).replace(/,/g, ""));
     };
@@ -232,7 +246,6 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("txn-search-open").click();
     await page.getByTestId("txn-search").waitFor();
     assert(await page.getByTestId("txn-search").evaluate((el) => el === document.activeElement), "the search bar has focus");
-    await page.waitForFunction((n) => document.querySelectorAll("[data-testid=txn]").length === n, listTotal);
     await shot("search-open");
     await page.getByTestId("txn-search").fill("trader");
     const traders = await searched();
@@ -261,7 +274,7 @@ async function runFlow(name, options, chromiumPath, pg) {
 
     // 2. Tap the Transportation slice: subcategories and a filtered list.
     const r = await range();
-    await tapSlice(page, server.base, { reportId: "spending-by-category", params: { ...r } }, "transportation", !!options.hasTouch);
+    await tapSlice(page, server.base, "spending-by-category", { ...r, path: [] }, "transportation", !!options.hasTouch);
     await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Transportation"));
     await page.locator('[data-testid=ranked-row][data-key="transportation.taxis-and-ride-shares"]').waitFor();
     assert((await crumbs()).includes("All spending"), "breadcrumb root");
@@ -269,14 +282,14 @@ async function runFlow(name, options, chromiumPath, pg) {
 
     // 3. Tap the "Taxis and rideshare" slice: its merchants, and the list narrows to it and
     //    shows the Uber Eats orders Plaid filed as rides.
-    await tapSlice(page, server.base, { reportId: "spending-by-category", params: { ...r, path: "transportation" } }, "transportation.taxis-and-ride-shares", !!options.hasTouch);
+    await tapSlice(page, server.base, "spending-by-category", { ...r, path: ["transportation"] }, "transportation.taxis-and-ride-shares", !!options.hasTouch);
     await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Taxis and rideshare"));
     const eats = page.locator("[data-testid=txn]", { hasText: "Uber Eats" }).first();
     await eats.waitFor();
     await page.locator('[data-testid=ranked-row][data-key="uber eats"]').waitFor();
     const listCats = await page.locator("[data-testid=txn] .txn-cat").allInnerTexts();
     assert(listCats.length > 0 && listCats.every((c) => c === "Taxis and rideshare"), `list filtered to the subcategory (${[...new Set(listCats)]})`);
-    const taxisBefore = await (await page.request.get(`${server.base}/reports/api/reports/spending-by-category/data?${new URLSearchParams({ ...r, path: "transportation" })}`)).json();
+    const taxisBefore = await reportData(page, server.base, "spending-by-category", { ...r, path: ["transportation"] });
     const taxisValueBefore = taxisBefore.rows.find((x) => x.key === "transportation.taxis-and-ride-shares").value;
     await shot("drill-taxis");
 
@@ -308,7 +321,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     const toast = await page.getByTestId("toast").innerText();
     assert(toast.includes(`${previewCount} past`), `toast reports the backfill (${toast})`);
     await page.waitForFunction(() => ![...document.querySelectorAll("[data-testid=txn]")].some((el) => el.textContent?.includes("Uber Eats")));
-    const taxisAfter = await (await page.request.get(`${server.base}/reports/api/reports/spending-by-category/data?${new URLSearchParams({ ...r, path: "transportation" })}`)).json();
+    const taxisAfter = await reportData(page, server.base, "spending-by-category", { ...r, path: ["transportation"] });
     const taxisValueAfter = taxisAfter.rows.find((x) => x.key === "transportation.taxis-and-ride-shares").value;
     assert(taxisValueAfter < taxisValueBefore - 100, `taxis shrank (${taxisValueBefore} → ${taxisValueAfter})`);
     await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="uber eats"]'));
@@ -438,9 +451,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(oneLine === options.viewport.width >= 768, `account filter ${oneLine ? "beside" : "below"} the range bar at ${options.viewport.width}px`);
     await page.getByTestId("accounts-toggle").click();
     await page.getByTestId("accounts").waitFor();
-    const onlyJordan = page.waitForResponse((res) => res.url().includes("/data?") && new URL(res.url()).searchParams.get("accounts") === "jordan");
     await page.getByRole("button", { name: "Only Jordan Rewards Visa ••3308" }).click();
-    await onlyJordan;
     assert(accountsParam() === "jordan", `only one account in the URL (${page.url()})`);
     assert((await page.getByTestId("accounts-toggle").innerText()).includes("Jordan Rewards Visa"), "the filter names the account");
     assert(await page.locator('[data-testid=account-checkbox][data-account="jordan"]').isDisabled(), "the last checked account cannot be unchecked");

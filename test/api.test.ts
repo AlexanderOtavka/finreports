@@ -1,15 +1,19 @@
+import { gunzipSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
+import { findReport } from "../src/reports/index.js";
 import monthlyTrend from "../src/reports/monthly-trend.js";
+import { inScope, runReport, selection, toReportTxn } from "../src/reports/run.js";
+import type { ReportContext, ReportTxn } from "../src/reports/types.js";
 import { SampleAdapter } from "../src/server/adapters/sample.js";
 import { buildApp } from "../src/server/app.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
 import { SyncService } from "../src/server/sync.js";
-import type { AccountDto, ReportData, TxnPage } from "../src/shared/api.js";
+import type { AccountDto, CategoryDto, ReportData, TxnDto } from "../src/shared/api.js";
 import { merchantRule } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
 const END = "2026-09-30";
-const RANGE = "from=2025-10-01&to=2026-09-30";
+const RANGE = { from: "2025-10-01", to: "2026-09-30" };
 
 describe("API (sample backend, dev auth bypass)", async () => {
   const db = await freshDb();
@@ -36,6 +40,22 @@ describe("API (sample backend, dev auth bypass)", async () => {
   const post = (url: string, payload: unknown, headers: Record<string, string> = {}) =>
     app.inject({ method: "POST", url, payload: payload as object, headers: { host: "localhost", "x-csrf-token": csrf, ...headers } });
 
+  // The reports run in the browser, over every transaction; here, the same code over the same
+  // responses.
+  const allTxns = async (): Promise<ReportTxn[]> => {
+    const [txns, categories] = await Promise.all([get<TxnDto[]>("/reports/api/transactions"), get<CategoryDto[]>("/reports/api/categories")]);
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    return txns.map((t) => toReportTxn(t, byId));
+  };
+  const run = async (reportId: string, ctx: Partial<ReportContext> = {}): Promise<ReportData> => {
+    const report = findReport(reportId)!;
+    return runReport(report, inScope(report, await allTxns(), { ...RANGE, path: [], ...ctx }), ctx.path ?? []);
+  };
+  const listed = async (reportId: string, ctx: Partial<ReportContext> = {}): Promise<ReportTxn[]> => {
+    const report = findReport(reportId)!;
+    return selection(report, inScope(report, await allTxns(), { ...RANGE, path: [], ...ctx }), ctx.path ?? []);
+  };
+
   it("serves health without a host check", async () => {
     const res = await app.inject({ method: "GET", url: "/reports/-/healthz", headers: { host: "10.42.0.7:8080" } });
     expect(res.statusCode).toBe(200);
@@ -59,38 +79,73 @@ describe("API (sample backend, dev auth bypass)", async () => {
     ]);
   });
 
+  it("hands over every transaction, compressed when the browser can take it", async () => {
+    const plain = await app.inject({ method: "GET", url: "/reports/api/transactions", headers: { host: "localhost" } });
+    expect(plain.statusCode).toBe(200);
+    expect(plain.headers["content-encoding"]).toBeUndefined();
+    const txns = plain.json() as TxnDto[];
+    const count = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM txn WHERE deleted_at IS NULL");
+    expect(txns).toHaveLength(count.rows[0]!.n);
+    expect(txns.every((t, i) => i === 0 || t.date <= txns[i - 1]!.date)).toBe(true);
+    expect(txns.find((t) => t.accountName === "Jordan Rewards Visa ••3308")!.accountId).toBe("jordan");
+
+    const gz = await app.inject({ method: "GET", url: "/reports/api/transactions", headers: { host: "localhost", "accept-encoding": "gzip, deflate, br" } });
+    expect(gz.headers["content-encoding"]).toBe("gzip");
+    expect(gz.headers["content-type"]).toContain("application/json");
+    expect(JSON.parse(gunzipSync(gz.rawPayload).toString("utf8"))).toEqual(txns);
+  });
+
+  it("counts spending the way the report_txn view does", async () => {
+    // The browser's categories and spending (toReportTxn) against the view's, per subcategory.
+    const sql = await db.query<{ key: string; label: string; value: number }>(
+      `SELECT t.leaf_id AS key, t.leaf_name AS label, round(sum(t.spend)::numeric, 2)::float8 AS value
+       FROM report_txn t WHERE t.date BETWEEN $1::date AND $2::date AND t.spend <> 0
+       GROUP BY 1, 2 HAVING sum(t.spend) > 0`,
+      [RANGE.from, RANGE.to],
+    );
+    const txns = (await allTxns()).filter((t) => t.date >= RANGE.from && t.date <= RANGE.to && t.spend !== 0);
+    const mine = new Map<string, { label: string; value: number }>();
+    for (const t of txns) {
+      const row = mine.get(t.leafId) ?? { label: t.leafName, value: 0 };
+      row.value += t.spend;
+      mine.set(t.leafId, row);
+    }
+    expect(sql.rows.length).toBeGreaterThan(10);
+    for (const row of sql.rows) {
+      expect(mine.get(row.key)?.label).toBe(row.label);
+      expect(mine.get(row.key)!.value).toBeCloseTo(row.value, 2);
+    }
+  });
+
   it("drills down the category report", async () => {
-    const top = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}`);
+    const top = await run("spending-by-category");
     expect(top.level).toBe(0);
     expect(top.canDrill).toBe(true);
     expect(top.rows[0]!.key).toBe("rent-and-utilities");
     expect(top.rows.map((r) => r.key)).not.toContain("income");
     expect(top.rows.map((r) => r.key)).not.toContain("loan-payments");
 
-    const food = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&path=food-and-drink`);
+    const food = await run("spending-by-category", { path: ["food-and-drink"] });
     expect(food.level).toBe(1);
     expect(food.breadcrumbs.map((b) => b.label)).toEqual(["All spending", "Food and Drink"]);
     expect(food.rows.map((r) => r.key)).toContain("food-and-drink.groceries");
     expect(food.total).toBeCloseTo(top.rows.find((r) => r.key === "food-and-drink")!.value, 2);
 
-    const groceries = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&path=food-and-drink/food-and-drink.groceries`);
+    const groceries = await run("spending-by-category", { path: ["food-and-drink", "food-and-drink.groceries"] });
     expect(groceries.level).toBe(2);
     expect(groceries.canDrill).toBe(false);
     expect(groceries.breadcrumbs.map((b) => b.label)).toEqual(["All spending", "Food and Drink", "Groceries"]);
-    // The last level groups by merchant key, named by the backend's merchant name.
+    // The last level groups by merchant key, named by the merchant's name.
     expect(groceries.rows.length).toBeGreaterThan(1);
     expect(groceries.total).toBeCloseTo(food.rows.find((r) => r.key === "food-and-drink.groceries")!.value, 2);
     const merchant = groceries.rows[0]!;
-    const picked = await get<ReportData>(
-      `/reports/api/reports/spending-by-category/data?${RANGE}&path=food-and-drink/food-and-drink.groceries/${encodeURIComponent(merchant.key)}`,
-    );
+    const path = ["food-and-drink", "food-and-drink.groceries", merchant.key];
+    const picked = await run("spending-by-category", { path });
     expect(picked.level).toBe(2);
     expect(picked.breadcrumbs.at(-1)!.label).toBe(merchant.label);
-    const txns = await get<TxnPage>(
-      `/reports/api/reports/spending-by-category/transactions?${RANGE}&path=food-and-drink/food-and-drink.groceries/${encodeURIComponent(merchant.key)}&limit=200`,
-    );
-    expect(txns.items.length).toBeGreaterThan(0);
-    expect(txns.items.every((t) => t.merchantKey === merchant.key && t.categoryId === "food-and-drink.groceries")).toBe(true);
+    const txns = await listed("spending-by-category", { path });
+    expect(txns.length).toBeGreaterThan(0);
+    expect(txns.every((t) => t.merchantKey === merchant.key && t.categoryId === "food-and-drink.groceries")).toBe(true);
   });
 
   it("orders categories by all-time spending, for their colors", async () => {
@@ -100,16 +155,11 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(new Set(order).size).toBe(order.length);
   });
 
-  it("lists the transactions behind a selection, paginated", async () => {
-    const first = await get<TxnPage>(`/reports/api/reports/spending-by-category/transactions?${RANGE}&path=food-and-drink/food-and-drink.coffee&limit=20`);
-    expect(first.items).toHaveLength(20);
-    expect(first.total).toBeGreaterThan(20);
-    expect(first.items.every((t) => t.categoryId === "food-and-drink.coffee")).toBe(true);
-    const second = await get<TxnPage>(
-      `/reports/api/reports/spending-by-category/transactions?${RANGE}&path=food-and-drink/food-and-drink.coffee&limit=20&cursor=${encodeURIComponent(first.nextCursor!)}`,
-    );
-    expect(second.items[0]!.id).not.toBe(first.items[0]!.id);
-    expect(second.items[0]!.date <= first.items[19]!.date).toBe(true);
+  it("lists the transactions behind a selection, newest first", async () => {
+    const coffee = await listed("spending-by-category", { path: ["food-and-drink", "food-and-drink.coffee"] });
+    expect(coffee.length).toBeGreaterThan(20);
+    expect(coffee.every((t) => t.categoryId === "food-and-drink.coffee" && t.date >= RANGE.from && t.date <= RANGE.to)).toBe(true);
+    expect(coffee.every((t, i) => i === 0 || t.date < coffee[i - 1]!.date || (t.date === coffee[i - 1]!.date && t.id < coffee[i - 1]!.id))).toBe(true);
   });
 
   it("limits reports to the chosen accounts", async () => {
@@ -117,29 +167,29 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(accounts.map((a) => a.id).sort()).toEqual(["chk", "jordan", "sam", "sav"]);
     expect(accounts.find((a) => a.id === "jordan")!.name).toBe("Jordan Rewards Visa ••3308");
 
-    const all = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}`);
-    const jordan = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=jordan`);
-    const rest = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=chk,sam,sav`);
+    const all = await run("spending-by-category");
+    const jordan = await run("spending-by-category", { accounts: ["jordan"] });
+    const rest = await run("spending-by-category", { accounts: ["chk", "sam", "sav"] });
     expect(jordan.total).toBeGreaterThan(0);
     expect(jordan.total).toBeLessThan(all.total);
     expect(jordan.total + rest.total).toBeCloseTo(all.total, 2);
 
-    const txns = await get<TxnPage>(`/reports/api/reports/spending-by-category/transactions?${RANGE}&accounts=jordan&limit=500`);
-    expect(txns.items.length).toBeGreaterThan(0);
-    expect(txns.items.every((t) => t.accountName === "Jordan Rewards Visa ••3308")).toBe(true);
+    const txns = await listed("spending-by-category", { accounts: ["jordan"] });
+    expect(txns.length).toBeGreaterThan(0);
+    expect(txns.every((t) => t.accountName === "Jordan Rewards Visa ••3308")).toBe(true);
 
     // The filter applies at every drill level, and to the monthly report too.
-    const food = await get<ReportData>(`/reports/api/reports/spending-by-category/data?${RANGE}&accounts=jordan&path=food-and-drink`);
+    const food = await run("spending-by-category", { accounts: ["jordan"], path: ["food-and-drink"] });
     expect(food.total).toBeCloseTo(jordan.rows.find((r) => r.key === "food-and-drink")!.value, 2);
-    const months = await get<ReportData>(`/reports/api/reports/monthly-trend/data?${RANGE}&accounts=jordan`);
-    const sept = await get<ReportData>("/reports/api/reports/spending-by-category/data?from=2026-09-01&to=2026-09-30&accounts=jordan");
+    const months = await run("monthly-trend", { accounts: ["jordan"] });
+    const sept = await run("spending-by-category", { from: "2026-09-01", to: "2026-09-30", accounts: ["jordan"] });
     const septBar = months.rows.filter((r) => r.key === "2026-09").reduce((sum, r) => sum + r.value, 0);
     expect(septBar).toBeGreaterThan(0);
     expect(septBar).toBeCloseTo(sept.total, 2);
   });
 
   it("runs the monthly trend report", async () => {
-    const months = await get<ReportData>(`/reports/api/reports/monthly-trend/data?${RANGE}`);
+    const months = await run("monthly-trend");
     expect(months.levels).toBe(1);
     // One row per month and category, for the stacked bars.
     expect(new Set(months.rows.map((r) => r.key)).size).toBe(12);
@@ -147,7 +197,7 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(sept.length).toBeGreaterThan(3);
     expect(sept.every((r) => typeof r.top_id === "string" && r.label === "Sep 2026")).toBe(true);
     // A month's bar adds up to the category report for that month.
-    const cats = await get<ReportData>("/reports/api/reports/spending-by-category/data?from=2026-09-01&to=2026-09-30");
+    const cats = await run("spending-by-category", { from: "2026-09-01", to: "2026-09-30" });
     expect(sept.reduce((sum, r) => sum + r.value, 0)).toBeCloseTo(cats.total, 2);
   });
 
@@ -170,8 +220,8 @@ describe("API (sample backend, dev auth bypass)", async () => {
   });
 
   it("recategorizes with a merchant rule: preview, apply, log, export", async () => {
-    const shopping = await get<TxnPage>(`/reports/api/reports/spending-by-category/transactions?${RANGE}&path=transportation/transportation.taxis-and-ride-shares&limit=200`);
-    const eats = shopping.items.find((t) => t.merchant === "Uber Eats")!;
+    const taxis = ["transportation", "transportation.taxis-and-ride-shares"];
+    const eats = (await listed("spending-by-category", { path: taxis })).find((t) => t.merchant === "Uber Eats")!;
     expect(eats).toBeDefined();
 
     const suggestions = await get<{ likely: string[]; recent: string[] }>(`/reports/api/transactions/${eats.id}/suggestions`);
@@ -194,8 +244,8 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(res.json().rule.backfilled).toBe(count);
     expect(res.json().txn).toMatchObject({ id: eats.id, categoryId: "food-and-drink.restaurant", provenance: "manual" });
 
-    const after = await get<TxnPage>(`/reports/api/reports/spending-by-category/transactions?${RANGE}&path=transportation/transportation.taxis-and-ride-shares&limit=200`);
-    expect(after.items.some((t) => t.merchant === "Uber Eats")).toBe(false);
+    const after = await listed("spending-by-category", { path: taxis });
+    expect(after.some((t) => t.merchant === "Uber Eats")).toBe(false);
 
     const exported = await app.inject({ method: "GET", url: "/reports/api/decision-events.jsonl", headers: { host: "localhost" } });
     expect(exported.headers["content-type"]).toContain("application/x-ndjson");
@@ -221,8 +271,6 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect((await post("/reports/api/transactions/1/category", { categoryId: "nope" })).statusCode).toBe(400);
     expect((await post("/reports/api/transactions/999999/category", { categoryId: "food-and-drink.coffee" })).statusCode).toBe(404);
     expect((await post("/reports/api/rules", { definition: { when: { merchant: { like: "x" } }, then: { categoryId: "food-and-drink.coffee" } } })).statusCode).toBe(400);
-    expect((await app.inject({ method: "GET", url: "/reports/api/reports/spending-by-category/data?from=yesterday&to=2026-01-01", headers: { host: "localhost" } })).statusCode).toBe(400);
-    expect((await app.inject({ method: "GET", url: "/reports/api/reports/nope/data?" + RANGE, headers: { host: "localhost" } })).statusCode).toBe(404);
   });
 
   it("creates subcategories one level deep", async () => {

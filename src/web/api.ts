@@ -7,7 +7,7 @@ import type {
   RulePreview,
   SessionDto,
   SuggestionsDto,
-  TxnPage,
+  TxnDto,
 } from "../shared/api.js";
 import type { RuleDefinition } from "../shared/rules.js";
 
@@ -60,14 +60,6 @@ export interface ReportQuery {
   accounts: string[] | null;
 }
 
-const qs = (q: ReportQuery, extra: Record<string, string | undefined> = {}) => {
-  const params = new URLSearchParams({ from: q.from, to: q.to });
-  if (q.path.length) params.set("path", q.path.map(encodeURIComponent).join("/"));
-  if (q.accounts) params.set("accounts", q.accounts.map(encodeURIComponent).join(","));
-  for (const [k, v] of Object.entries(extra)) if (v !== undefined) params.set(k, v);
-  return params.toString();
-};
-
 export const api = {
   async session(): Promise<SessionDto> {
     const s = await request<SessionDto>("GET", "/session");
@@ -77,15 +69,8 @@ export const api = {
   categories: () => request<CategoryDto[]>("GET", "/categories"),
   categoryOrder: () => request<string[]>("GET", "/category-order"),
   accounts: () => request<AccountDto[]>("GET", "/accounts"),
-  report: (q: ReportQuery, signal?: AbortSignal) =>
-    request<ReportData>("GET", `/reports/${encodeURIComponent(q.reportId)}/data?${qs(q)}`, undefined, signal),
-  transactions: (q: ReportQuery, cursor: string | null, signal?: AbortSignal, limit = 60) =>
-    request<TxnPage>(
-      "GET",
-      `/reports/${encodeURIComponent(q.reportId)}/transactions?${qs(q, { cursor: cursor ?? undefined, limit: String(Math.min(limit, 500)) })}`,
-      undefined,
-      signal,
-    ),
+  /** Every transaction; the reports run over them in the browser. */
+  transactions: () => request<TxnDto[]>("GET", "/transactions"),
   suggestions: (txnId: number) => request<SuggestionsDto>("GET", `/transactions/${txnId}/suggestions`),
   previewRule: (definition: RuleDefinition, excludeTxnId: number, signal?: AbortSignal) =>
     request<RulePreview>("POST", "/rules/preview", { definition, excludeTxnId }, signal),

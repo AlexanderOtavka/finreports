@@ -1,14 +1,14 @@
-import { useDeferredValue, useEffect, useMemo, useRef } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { TxnDto } from "../../shared/api.js";
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney } from "../format.js";
 import { highlightParts, parseQuery, TxnSearch } from "../search.js";
 
 interface Props {
+  /** Every transaction in the selection, newest first. */
   items: TxnDto[];
-  total: number;
+  /** Until the transactions arrive. */
   loading: boolean;
-  hasMore: boolean;
   categories: CategoryTree;
   /** Ids just changed by the user, briefly highlighted. */
   flash: Set<number>;
@@ -17,7 +17,6 @@ interface Props {
   /** What the list is already narrowed to (the drill path and range), which search keeps. */
   scope: string;
   onSearch(query: string | null): void;
-  onLoadMore(): void;
   onOpen(txn: TxnDto): void;
 }
 
@@ -47,13 +46,21 @@ function SearchIcon() {
   );
 }
 
-export function TxnList({ items, total, loading, hasMore, categories, flash, search, scope, onSearch, onLoadMore, onOpen }: Props) {
+/** Rows drawn at first, and added each time the end of the list comes near. */
+const PAGE = 100;
+
+/**
+ * The transactions behind the chart's selection, all of them already here: only drawing them
+ * is spread out, a page at a time as the list scrolls. Give it a new `key` for a new selection,
+ * so it starts again from the first page.
+ */
+export function TxnList({ items, loading, categories, flash, search, scope, onSearch, onOpen }: Props) {
   const sentinel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const section = useRef<HTMLElement>(null);
-  const onLoadMoreRef = useRef(onLoadMore);
-  onLoadMoreRef.current = onLoadMore;
+  const [limit, setLimit] = useState(PAGE);
   const searching = search !== null;
+  const total = items.length;
 
   // Typing stays snappy on a long list: the filter catches up a frame behind the keystrokes.
   const query = useDeferredValue(search ?? "");
@@ -61,6 +68,8 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
   const index = useMemo(() => (searching ? new TxnSearch(items, categories) : null), [searching, items, categories]);
   const shown = useMemo(() => (index && terms.length ? index.filter(terms) : items), [index, terms, items]);
   const filtering = searching && terms.length > 0;
+  const drawn = shown.length > limit ? shown.slice(0, limit) : shown;
+  const hasMore = drawn.length < shown.length;
 
   // The bar opens in place, under the chart. Opened empty, it takes the typing; opened with a
   // query (a merchant from the sheet), it leaves the keyboard down and the page where it was.
@@ -72,13 +81,13 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
 
   useEffect(() => {
     const node = sentinel.current;
-    if (!node || !hasMore || searching) return;
+    if (!node || !hasMore) return;
     const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) onLoadMoreRef.current();
-    }, { rootMargin: "400px" });
+      if (entries.some((e) => e.isIntersecting)) setLimit((n) => n + PAGE);
+    }, { rootMargin: "600px" });
     io.observe(node);
     return () => io.disconnect();
-  }, [hasMore, items.length, searching]);
+  }, [hasMore, drawn.length]);
 
   const header = searching ? (
     <div className="txn-search" role="search">
@@ -107,7 +116,7 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
   ) : (
     <h2 className="section-title">
       <span>
-        Transactions <span className="muted">· {total.toLocaleString("en-US")}</span>
+        Transactions {!loading && <span className="muted">· {total.toLocaleString("en-US")}</span>}
       </span>
       <button type="button" className="txn-search-open" onClick={() => onSearch("")} aria-label="Search transactions" title="Search transactions" data-testid="txn-search-open">
         <SearchIcon />
@@ -115,12 +124,12 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
     </h2>
   );
 
-  if (!searching && !loading && items.length === 0) {
+  if (!searching && (loading || items.length === 0)) {
     return (
       <div className="txns-area">
         <section className="txns" aria-label="Transactions" ref={section}>
           <div className="txns-head">{header}</div>
-          <p className="empty">No transactions in this selection.</p>
+          <p className="empty">{loading ? "Loading…" : "No transactions in this selection."}</p>
         </section>
       </div>
     );
@@ -133,14 +142,11 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
         <div className="txns-head">
           {header}
           {searching && (
-            <p className="txn-search-status" aria-live="polite" data-testid="txn-search-status">
+            <p className="txn-search-status" aria-live="polite" data-testid="txn-search-status" data-query={query}>
               {filtering ? (
                 <>
-                  <strong data-testid="txn-search-count">{shown.length.toLocaleString("en-US")}</strong> of {items.length.toLocaleString("en-US")}
-                  {hasMore ? `, loading the other ${(total - items.length).toLocaleString("en-US")}…` : ""} in{" "}
+                  <strong data-testid="txn-search-count">{shown.length.toLocaleString("en-US")}</strong> of {total.toLocaleString("en-US")} in{" "}
                 </>
-              ) : hasMore ? (
-                `Loading all ${total.toLocaleString("en-US")} transactions in `
               ) : (
                 `Searching all ${total.toLocaleString("en-US")} transactions in `
               )}
@@ -148,9 +154,9 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
             </p>
           )}
         </div>
-        {filtering && shown.length === 0 && !hasMore && <p className="empty">No transactions match “{query}”.</p>}
+        {filtering && shown.length === 0 && <p className="empty">No transactions match “{query}”.</p>}
         <ul className="txn-list" data-testid="txn-list">
-          {shown.map((t) => {
+          {drawn.map((t) => {
             const showDate = t.date !== lastDate;
             lastDate = t.date;
             const prov = provenanceLabel(t.provenance);
@@ -204,10 +210,10 @@ export function TxnList({ items, total, loading, hasMore, categories, flash, sea
             );
           })}
         </ul>
-        {hasMore && !searching && (
+        {hasMore && (
           <div ref={sentinel} className="load-more">
-            <button type="button" className="btn-quiet" onClick={() => onLoadMore()} disabled={loading}>
-              {loading ? "Loading…" : "Load more"}
+            <button type="button" className="btn-quiet" onClick={() => setLimit((n) => n + PAGE)}>
+              Show more
             </button>
           </div>
         )}

@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { z } from "zod";
-import { findReport, REPORTS } from "../reports/index.js";
+import { REPORTS } from "../reports/index.js";
 import type { AccountDto, SessionDto } from "../shared/api.js";
 import { recategorize, suggestions } from "./actions.js";
 import type { BackendAdapter } from "./adapters/types.js";
@@ -14,24 +16,13 @@ import type { Config } from "./config.js";
 import { appRoot, inTransaction, type Db } from "./db.js";
 import { exportJsonl } from "./decisions.js";
 import { HttpError } from "./errors.js";
-import { reportTransactions, runReport } from "./reportRunner.js";
 import { backfillCandidates, deleteRule, listRules, parseDefinition, saveRule } from "./rules.js";
 import type { SyncService } from "./sync.js";
-import { toDto } from "./txns.js";
+import { toDto, type TxnRow } from "./txns.js";
 
 const BASE = "/reports";
+const gzipAsync = promisify(gzip);
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const reportQuery = z.object({
-  from: isoDate,
-  to: isoDate,
-  path: z.string().max(400).optional(),
-  accounts: z.string().max(2000).optional(),
-});
-const pageQuery = reportQuery.extend({
-  cursor: z.string().max(40).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
-});
 const uiContext = z
   .object({
     reportId: z.string().max(100).optional(),
@@ -61,18 +52,6 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   }
   return res.data;
 }
-
-const splitPath = (raw: string | undefined): string[] => (raw ? raw.split("/").filter(Boolean).map(decodeURIComponent) : []);
-/** `accounts=a,b` limits a report to those accounts; without it, all of them. */
-const splitAccounts = (raw: string | undefined): string[] | null =>
-  raw === undefined ? null : raw.split(",").filter(Boolean).map(decodeURIComponent);
-
-const reportContext = (q: z.infer<typeof reportQuery>) => ({
-  from: q.from,
-  to: q.to,
-  path: splitPath(q.path),
-  accounts: splitAccounts(q.accounts),
-});
 
 export interface AppDeps {
   config: Config;
@@ -130,21 +109,15 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
 
   app.get(`${BASE}/api/reports`, async () => REPORTS.map((r) => ({ id: r.id, title: r.title, description: r.description })));
 
-  app.get<{ Params: { id: string } }>(`${BASE}/api/reports/:id/data`, async (req) => {
-    const report = findReport(req.params.id);
-    if (!report) throw new HttpError(404, "no such report");
-    const q = parse(reportQuery, req.query);
-    return runReport(db, report, reportContext(q));
-  });
-
-  app.get<{ Params: { id: string } }>(`${BASE}/api/reports/:id/transactions`, async (req) => {
-    const report = findReport(req.params.id);
-    if (!report) throw new HttpError(404, "no such report");
-    const q = parse(pageQuery, req.query);
-    return reportTransactions(db, report, reportContext(q), {
-      cursor: q.cursor ?? null,
-      limit: q.limit,
-    });
+  // Every transaction: the web app runs the reports over them itself, so a new report, range,
+  // set of accounts or drill path needs no request. By far the biggest response, so it is
+  // compressed here rather than counting on a proxy to do it.
+  app.get(`${BASE}/api/transactions`, async (req, reply) => {
+    const res = await db.query<TxnRow>("SELECT * FROM txn WHERE deleted_at IS NULL ORDER BY date DESC, id DESC");
+    const json = JSON.stringify(res.rows.map(toDto));
+    reply.type("application/json; charset=utf-8").header("vary", "accept-encoding");
+    if (!/\bgzip\b/.test(req.headers["accept-encoding"] ?? "")) return reply.send(json);
+    return reply.header("content-encoding", "gzip").send(await gzipAsync(json));
   });
 
   app.get(`${BASE}/api/categories`, async () => listCategories(db));

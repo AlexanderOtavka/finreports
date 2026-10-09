@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OTHER_KEY } from "../reports/category-drilldown.js";
 import { findReport, REPORTS } from "../reports/index.js";
+import { inScope, runReport, selection, toReportTxn } from "../reports/run.js";
 import type { RangePreset } from "../reports/types.js";
-import type { AccountDto, RecategorizeRequest, ReportData, SessionDto, TxnDto } from "../shared/api.js";
+import type { AccountDto, RecategorizeRequest, SessionDto, TxnDto } from "../shared/api.js";
 import { api, ApiError, type ReportQuery } from "./api.js";
 import { CategoryTree } from "./categories.js";
 import { AccountFilter } from "./components/AccountFilter.js";
@@ -10,7 +11,7 @@ import { Chart } from "./components/Chart.js";
 import { RecategorizeSheet } from "./components/RecategorizeSheet.js";
 import { TxnList } from "./components/TxnList.js";
 import { formatMoneyShort, formatRange, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
-import { chartTheme, ColorMemory, useDarkMode } from "./theme.js";
+import { chartTheme, useDarkMode } from "./theme.js";
 
 // ---------------------------------------------------------------------------------------
 // URL state: the report, range and drill path live in the query string, so reload, share and
@@ -78,33 +79,26 @@ export function App() {
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(readUrl);
-  const [loaded, setData] = useState<ReportData | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [txns, setTxns] = useState<TxnDto[]>([]);
-  const [txnTotal, setTxnTotal] = useState(0);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [txnLoading, setTxnLoading] = useState(true);
+  /** Every transaction, null until they arrive. The chart and the list are computed from them. */
+  const [txns, setTxns] = useState<TxnDto[] | null>(null);
   const [openTxn, setOpenTxn] = useState<TxnDto | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [flash, setFlash] = useState<Set<number>>(new Set());
   const [showAllRows, setShowAllRows] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
   const [search, setSearch] = useState<string | null>(null);
   const dark = useDarkMode();
-  const colors = useRef(new ColorMemory());
 
   const report = findReport(view.reportId) ?? REPORTS[0]!;
-  // Until the new report loads, the last one's data does not fit this report's chart and list.
-  const data = loaded?.reportId === report.id ? loaded : null;
 
   useEffect(() => {
-    Promise.all([api.session(), api.categories(), api.categoryOrder(), api.accounts()])
-      .then(([s, c, order, accts]) => {
+    Promise.all([api.session(), api.categories(), api.categoryOrder(), api.accounts(), api.transactions()])
+      .then(([s, c, order, accts, all]) => {
         setCategoryOrder(order);
         setAccounts(accts);
         setSession(s);
         setCategories(new CategoryTree(c));
+        setTxns(all);
       })
       .catch((err: Error) => {
         if (!(err instanceof ApiError && err.status === 401)) setFatal(err.message);
@@ -147,66 +141,14 @@ export function App() {
     if (view.range) setCustomOpen(false);
   }, [view.range]);
 
-  // Load the chart and the first page of transactions whenever the view changes; a refresh
-  // (after a recategorization) reloads both without blanking the screen.
-  const loadedCount = useRef(0);
-  loadedCount.current = txns.length;
-  const lastViewKey = useRef("");
-  useEffect(() => {
-    if (!session) return;
-    const ctl = new AbortController();
-    // A preset turned custom shows the same data, so it does not count as a new view.
-    const viewKey = JSON.stringify({ ...view, range: undefined });
-    const isRefresh = viewKey === lastViewKey.current;
-    lastViewKey.current = viewKey;
-    if (!isRefresh) {
-      setDataLoading(true);
-      setTxnLoading(true);
-    }
-    const handle = (err: Error) => {
-      if (err.name === "AbortError") return;
-      setToast({ id: Date.now(), text: err.message, error: true });
-    };
-    api
-      .report(view, ctl.signal)
-      .then((d) => {
-        setData(d);
-        setDataLoading(false);
-      })
-      .catch(handle);
-    api
-      .transactions(view, null, ctl.signal, isRefresh ? Math.max(60, loadedCount.current) : 60)
-      .then((page) => {
-        setTxns(page.items);
-        setTxnTotal(page.total);
-        setCursor(page.nextCursor);
-        setTxnLoading(false);
-      })
-      .catch(handle);
-    return () => ctl.abort();
-  }, [session, view, refreshTick]);
-
-  const loadMore = useCallback((limit?: number) => {
-    if (!cursor || txnLoading) return;
-    setTxnLoading(true);
-    api
-      .transactions(view, cursor, undefined, limit)
-      .then((page) => {
-        setTxns((prev) => [...prev, ...page.items.filter((t) => !prev.some((p) => p.id === t.id))]);
-        setCursor(page.nextCursor);
-        setTxnLoading(false);
-      })
-      .catch((err: Error) => {
-        setTxnLoading(false);
-        setToast({ id: Date.now(), text: err.message, error: true });
-      });
-  }, [cursor, txnLoading, view]);
-
-  // Search runs in the browser, over every transaction in the selection: while it is open,
-  // load the rest in big pages.
-  useEffect(() => {
-    if (search !== null && cursor && !txnLoading) loadMore(500);
-  }, [search, cursor, txnLoading, loadMore]);
+  // The chart and the list, from scratch on every change of the view (report, range, accounts,
+  // drill path) or of the transactions: no request, and nothing kept from the last view.
+  const reportTxns = useMemo(() => (txns && categories ? txns.map((t) => toReportTxn(t, categories.byId)) : null), [txns, categories]);
+  const { data, listTxns } = useMemo(() => {
+    if (!reportTxns) return { data: null, listTxns: [] };
+    const scoped = inScope(report, reportTxns, view);
+    return { data: runReport(report, scoped, view.path), listTxns: selection(report, scoped, view.path) };
+  }, [report, reportTxns, view]);
 
   useEffect(() => {
     if (!toast) return;
@@ -216,7 +158,6 @@ export function App() {
 
   // --- Drilling --------------------------------------------------------------------------
 
-  const level = data?.level ?? 0;
   const selectedKey = data && !data.canDrill ? (view.path[data.level] ?? null) : null;
 
   const onSelect = useCallback(
@@ -243,9 +184,7 @@ export function App() {
     [data, view, navigate, report],
   );
 
-  // Colors stick to their keys while the view (report, level, path, range) stays put.
-  const viewId = `${report.id}:${level}:${view.path.slice(0, level).join("/")}:${view.from}:${view.to}`;
-  const theme = useMemo(() => chartTheme(dark, viewId, colors.current, categoryOrder), [dark, viewId, categoryOrder]);
+  const theme = useMemo(() => chartTheme(dark, categoryOrder), [dark, categoryOrder]);
   const option = useMemo(() => (data ? report.chart(data, theme, selectedKey) : null), [data, report, theme, selectedKey]);
 
   // --- Recategorizing --------------------------------------------------------------------
@@ -258,14 +197,14 @@ export function App() {
   const onSave = useCallback(
     async (req: RecategorizeRequest) => {
       const txn = openTxn;
-      if (!txn || !categories) return;
+      if (!txn || !categories || !txns) return;
       setOpenTxn(null);
-      // Optimistic: the list shows the new category at once (and, with a backfilled rule,
-      // so does every listed transaction from the same merchant that is not set by hand).
+      // Optimistic: the chart and the list show the new category at once (and, with a
+      // backfilled rule, so does every transaction from the same merchant not set by hand).
       const before = txns;
       const touched = new Set<number>([txn.id]);
       setTxns((list) =>
-        list.map((t) => {
+        list!.map((t) => {
           if (t.id === txn.id) return { ...t, categoryId: req.categoryId, provenance: "manual" };
           if (req.merchantRule?.applyToPast && t.merchantKey === txn.merchantKey && t.provenance !== "manual") {
             touched.add(t.id);
@@ -284,8 +223,15 @@ export function App() {
             : " · rule saved"
           : "";
         setToast({ id: Date.now(), text: `${txn.merchant} → ${name}${extra}` });
-        // The chart and the list reload from the server; the optimistic list stays until then.
-        setRefreshTick((n) => n + 1);
+        // The server's word on the transaction; with a rule, on all of them (the rule may reach
+        // further than the guess above). The optimistic list stays until then.
+        setTxns((list) => list!.map((t) => (t.id === res.txn.id ? res.txn : t)));
+        if (res.rule) {
+          api
+            .transactions()
+            .then(setTxns)
+            .catch((err: Error) => setToast({ id: Date.now(), text: err.message, error: true }));
+        }
       } catch (err) {
         setTxns(before);
         setToast({ id: Date.now(), text: `Not saved: ${(err as Error).message}`, error: true });
@@ -315,6 +261,24 @@ export function App() {
     ro.observe(node);
     return () => ro.disconnect();
   }, [fatal]);
+
+  // An on-screen keyboard (iOS) shrinks only the visual viewport: the page scrolls under it while
+  // the sticky headers stay at the top of the layout viewport, up behind the browser's bar. The
+  // visible part's offset into the layout viewport, as --vv-top, brings them down to where the
+  // eye is. Not while pinch-zoomed, where the headers stay with the page.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement.style;
+    const update = () => root.setProperty("--vv-top", `${vv.scale > 1.01 ? 0 : Math.max(0, Math.round(vv.offsetTop))}px`);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   // --- Rendering -------------------------------------------------------------------------
 
@@ -431,7 +395,7 @@ export function App() {
       )}
 
       <div className="content">
-      <section className="card chart-card" aria-busy={dataLoading}>
+      <section className="card chart-card" aria-busy={!data}>
         <div className="card-head">
           <nav className="crumbs" aria-label="Drill path" data-testid="breadcrumbs">
             {(data?.breadcrumbs ?? [{ key: null, label: report.rootLabel }]).map((b, i, all) => {
@@ -456,15 +420,9 @@ export function App() {
         </div>
 
         {option && data && data.rows.length > 0 ? (
-          <Chart
-            option={option}
-            height={280}
-            onSelect={onSelect}
-            label={`${report.title}: ${data?.breadcrumbs.map((b) => b.label).join(" › ")}`}
-            view={viewId}
-          />
+          <Chart option={option} height={280} onSelect={onSelect} label={`${report.title}: ${data.breadcrumbs.map((b) => b.label).join(" › ")}`} />
         ) : (
-          <div className="chart-empty">{dataLoading ? "Loading…" : "Nothing spent in this range."}</div>
+          <div className="chart-empty">{data ? "Nothing spent in this range." : "Loading…"}</div>
         )}
 
         {rows.length > 0 && (
@@ -481,7 +439,7 @@ export function App() {
                       data-key={r.key}
                       data-testid="ranked-row"
                     >
-                      <span className="swatch" style={{ background: data && report.rowColor ? report.rowColor(data, r, i, theme) : theme.colorFor(r.key, i) }} aria-hidden="true" />
+                      <span className="swatch" style={{ background: data && report.rowColor ? report.rowColor(data, r, i, theme) : theme.colorFor(i) }} aria-hidden="true" />
                       <span className="ranked-label">{report.rowLabel ? report.rowLabel(r) : r.label}</span>
                       <span className="ranked-value">{formatMoneyShort(r.value)}</span>
                       <span className="ranked-share">{share}%</span>
@@ -502,16 +460,15 @@ export function App() {
 
       {categories && (
         <TxnList
-          items={txns}
-          total={txnTotal}
-          loading={txnLoading}
-          hasMore={cursor !== null}
+          // A new selection starts the list again from its first page.
+          key={JSON.stringify([report.id, view.from, view.to, view.accounts, view.path])}
+          items={listTxns}
+          loading={!data}
           categories={categories}
           flash={flash}
           search={search}
           scope={`${data?.breadcrumbs.at(-1)?.label ?? report.rootLabel} · ${formatRange(view.from, view.to)}`}
           onSearch={setSearch}
-          onLoadMore={loadMore}
           onOpen={setOpenTxn}
         />
       )}

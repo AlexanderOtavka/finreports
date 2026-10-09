@@ -1,4 +1,5 @@
 import type { ReportRow } from "../shared/api.js";
+import { sumRows } from "./run.js";
 import type { ReportDefinition } from "./types.js";
 
 /**
@@ -33,6 +34,9 @@ function monthsBetween(first: string, last: string): string[] {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** "2026-09" → "Sep 2026" */
+const monthLabel = (month: string) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+
 const report: ReportDefinition = {
   id: "monthly-trend",
   title: "Monthly spending",
@@ -40,21 +44,19 @@ const report: ReportDefinition = {
   defaultRange: "12m",
   description: "Spending per month, stacked by category. Tap a month to break it down.",
   rootLabel: "All months",
-  baseFilter: "t.spend <> 0",
+  baseFilter: (t) => t.spend !== 0,
   levels: [
     {
       name: "Month",
-      query: (where) => `
-        SELECT to_char(t.date, 'YYYY-MM') AS key,
-               to_char(t.date, 'Mon YYYY') AS label,
-               t.top_id, t.top_name,
-               sum(t.spend)::float8 AS value
-        FROM report_txn t
-        WHERE ${where}
-        GROUP BY 1, 2, 3, 4
-        HAVING sum(t.spend) > 0
-        ORDER BY key, value DESC`,
-      filter: (key, { p }) => `to_char(t.date, 'YYYY-MM') = ${p(key)}`,
+      key: (t) => t.date.slice(0, 7),
+      // A row per month and category, oldest month first.
+      rows: (txns) =>
+        sumRows(txns, (t) => `${t.date.slice(0, 7)}|${t.topId}`, (t) => t.topName)
+          .map((r): Cell => {
+            const [month, topId] = r.key.split("|") as [string, string];
+            return { key: month, label: monthLabel(month), value: r.value, top_id: topId, top_name: r.label };
+          })
+          .sort((a, b) => (a.key === b.key ? b.value - a.value : a.key < b.key ? -1 : 1)),
     },
   ],
 
@@ -92,19 +94,19 @@ const report: ReportDefinition = {
 
     // One series per category with a hue, biggest at the bottom (the list's order); the small
     // categories without one stack together on top as "Other".
-    const series: Array<{ name: string; color: string; values: number[] }> = [];
+    const series: Array<{ id: string; name: string; color: string; values: number[] }> = [];
     const byCategory = new Map<string, number[]>();
     let other: number[] | null = null;
     for (const c of categories) {
       const color = theme.categoryColor(c.key);
       if (color) {
         const values = months.map(() => 0);
-        series.push({ name: c.label, color, values });
+        series.push({ id: c.key, name: c.label, color, values });
         byCategory.set(c.key, values);
       } else {
         if (!other) {
           other = months.map(() => 0);
-          series.push({ name: OTHER_SERIES, color: theme.other, values: other });
+          series.push({ id: "__other__", name: OTHER_SERIES, color: theme.other, values: other });
         }
         byCategory.set(c.key, other);
       }
@@ -161,7 +163,10 @@ const report: ReportDefinition = {
         },
         splitLine: { lineStyle: { color: theme.grid } },
       },
+      // A category's bars keep their series from one range or set of accounts to the next, so
+      // they grow and shrink to the new values.
       series: series.map((s, i) => ({
+        id: s.id,
         type: "bar",
         name: s.name,
         stack: "spend",

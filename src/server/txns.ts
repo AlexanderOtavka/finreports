@@ -47,6 +47,7 @@ export function toDto(row: TxnRow): TxnDto {
     merchant: merchantDisplay(row.merchant, row.description),
     merchantKey: row.merchant_key,
     description: row.description,
+    accountId: row.account_id,
     accountName: row.account_name,
     // Only when it says more than the merchant name does.
     counterparty: row.counterparty && row.counterparty !== row.merchant ? row.counterparty : null,

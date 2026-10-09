@@ -116,6 +116,13 @@ a {
   --page-max: 960px;
   /* Measured by the app; this is the usual navbar and tabs, without a safe area. */
   --topbar-h: 93px;
+  /* How far an on-screen keyboard has scrolled the visible part of the page down past the top
+     of the layout viewport, which sticky headers stick to; set by the app. */
+  --vv-top: 0px;
+  /* The sticky headers sit above everything else on the page (the chart's tooltip too); only
+     the sheet and the toast, which float over the whole page, go higher. */
+  --z-topbar: 10;
+  --z-sticky-head: 9;
 }
 .page {
   max-width: var(--page-max);
@@ -126,8 +133,8 @@ a {
 
 .topbar {
   position: sticky;
-  top: 0;
-  z-index: 5;
+  top: var(--vv-top);
+  z-index: var(--z-topbar);
   box-shadow: var(--shadow);
 }
 /* The navbar's blue goes on up past the top of the page: behind a browser's see-through top
@@ -444,6 +451,9 @@ a {
 }
 .chart {
   width: 100%;
+  /* ECharts gives its tooltip a huge z-index; kept inside the chart, it stays under the
+     sticky headers. */
+  isolation: isolate;
 }
 .chart-empty {
   height: 220px;
@@ -537,8 +547,8 @@ a {
 /* The title or the search bar sticks under the top bar once the list scrolls past it. */
 .txns-head {
   position: sticky;
-  top: var(--topbar-h);
-  z-index: 1;
+  top: calc(var(--topbar-h) + var(--vv-top));
+  z-index: var(--z-sticky-head);
   background: var(--surface);
 }
 .section-title {
@@ -1155,7 +1165,7 @@ a {
   }
   .content .chart-card {
     position: sticky;
-    top: calc(var(--topbar-h) + 0.75rem);
+    top: calc(var(--topbar-h) + var(--vv-top) + 0.75rem);
     margin: 0.75rem 0 0;
     max-height: calc(100vh - var(--topbar-h) - 1.5rem);
     overflow-y: auto;
