@@ -11,8 +11,12 @@ import type { ChartTheme, ReportDefinition } from "./types.js";
  */
 const OTHER_KEY = "__other__";
 
-/** The row's color, or null when the donut folds it into the "Other" slice. */
-function sliceColor(data: ReportData, row: ReportRow, index: number, theme: ChartTheme): string | null {
+/**
+ * The row's color, or null when the donut folds it into the "Other" slice: the category's hue at
+ * the top level, and below it, a shade of the drilled category's hue by the row's rank. The
+ * monthly report colors its series the same way, level for level.
+ */
+export function sliceColor(data: ReportData, row: ReportRow, index: number, theme: ChartTheme): string | null {
   if (data.level === 0) return theme.categoryColor(row.key);
   const top = data.breadcrumbs[1]?.key ?? "";
   return theme.shadeOf(theme.categoryColor(top) ?? theme.neutral, index);

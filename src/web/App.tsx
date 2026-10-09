@@ -166,9 +166,9 @@ export function App() {
         if (key === OTHER_KEY) setShowAllRows(true);
         return;
       }
-      if (report.link) {
-        // Same dates (a category over the whole range): keep the preset in the link.
-        const link = report.link(key, view);
+      const link = report.link?.(key, view);
+      if (link) {
+        // Same dates: keep the preset in the link.
         navigate({ ...link, accounts: view.accounts, range: link.from === view.from && link.to === view.to ? view.range : null });
         window.scrollTo({ top: 0 });
         return;
@@ -443,7 +443,7 @@ export function App() {
                       <span className="ranked-label">{report.rowLabel ? report.rowLabel(r) : r.label}</span>
                       <span className="ranked-value">{formatMoneyShort(r.value)}</span>
                       <span className="ranked-share">{share}%</span>
-                      {(data?.canDrill || report.link) && <span className="chev" aria-hidden="true">›</span>}
+                      {data?.canDrill && <span className="chev" aria-hidden="true">›</span>}
                     </button>
                   </li>
                 );

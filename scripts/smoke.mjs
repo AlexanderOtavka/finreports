@@ -361,7 +361,8 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(events[1].rule?.when?.merchant?.equals === "uber eats", "rule definition logged");
 
     // 9. The other report: bars stacked by category, listed under the chart as its legend. A
-    //    tap in the last month's column, above its bar, opens the category donut for that month.
+    //    tap on a category in the list stacks the bars by its subcategories; a tap in the last
+    //    month's column, above its bar, opens the category donut for that month, at that category.
     //    Leaving a custom range for it selects only its preset and closes the custom dates.
     await page.getByTestId("range-custom").click();
     await page.locator(".custom-range").waitFor();
@@ -372,9 +373,17 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(!(await page.locator(".custom-range").count()), "custom dates closed after switching report");
     await page.locator('[data-testid=ranked-row][data-key="rent-and-utilities"]').waitFor();
     await shot("monthly");
+    const monthlyRange = page.url();
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink"]').click();
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]').waitFor();
+    assert(urlParams().r === "monthly-trend" && urlParams().p === "food-and-drink", `a category drills the monthly report (${page.url()})`);
+    assert(urlParams().range === new URL(monthlyRange).searchParams.get("range"), "the drill keeps the range");
+    assert((await crumbs()).includes("Food"), "the breadcrumb names the category");
+    await shot("monthly-food");
     const bars = await page.getByTestId("chart").boundingBox();
     await page.mouse.click(bars.x + bars.width - 26, bars.y + 30);
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
+    assert(urlParams().p === "food-and-drink", `the month opens at the same category (${page.url()})`);
     const month = await range();
     assert(urlParams().from === month.from && urlParams().to === month.to && !urlParams().range, "a month is a custom range in the URL");
     assert(month.from.endsWith("-01") && month.from.slice(0, 7) === month.to.slice(0, 7), `opened one month (${month.from} – ${month.to})`);
@@ -382,8 +391,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("txn").first().waitFor();
     await shot("monthly-to-month");
 
-    // 10. Drill to a merchant: category, subcategory, then the biggest merchant narrows the list.
-    await page.locator('[data-testid=ranked-row][data-key="food-and-drink"]').click();
+    // 10. Drill on to a merchant: subcategory, then the biggest merchant narrows the list.
     await page.locator('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]').click();
     await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Restaurants"));
     await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]'));
@@ -470,6 +478,10 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "90d");
     assert(accountsParam() === "jordan,sam", "a range keeps the accounts");
     await page.getByTestId("ranked-row").first().click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.has("p"));
+    assert(accountsParam() === "jordan,sam", "a drill keeps the accounts");
+    const monthBars = await page.getByTestId("chart").boundingBox();
+    await page.mouse.click(monthBars.x + monthBars.width - 26, monthBars.y + 30);
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
     assert(accountsParam() === "jordan,sam", "a link to another report keeps the accounts");
     await page.goBack();

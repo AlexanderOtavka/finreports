@@ -101,9 +101,10 @@ export interface ReportDefinition {
   chart(data: ReportData, theme: ChartTheme, selectedKey: string | null): EChartsOption;
   /**
    * Instead of drilling, a tap on `key` (in the chart or the ranked list) opens another view,
-   * e.g. a month of the monthly report opens the category report for that month.
+   * e.g. a month of the monthly report opens the category report for that month. Null for a
+   * key that drills as usual.
    */
-  link?(key: string, ctx: ReportContext): ReportLink;
+  link?(key: string, ctx: ReportContext): ReportLink | null;
   /**
    * The rows of the ranked list under the chart, when they are not the chart's rows (a stacked
    * chart lists its series, as its legend). Defaults to `data.rows`.
