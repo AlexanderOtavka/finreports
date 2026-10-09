@@ -152,6 +152,18 @@ async function tapSlice(page, base, reportId, ctx, key, touch) {
     start += r.value;
   }
   assert(mid !== null, `slice ${key} has a slice of its own`);
+  // A new donut sweeps in clockwise: until it has, a tap where a later slice will be hits
+  // nothing. Wait for the drawing to stop changing.
+  await page.waitForFunction(
+    () => {
+      const now = document.querySelector("[data-testid=chart] canvas")?.toDataURL();
+      const settled = now !== undefined && now === window.__lastChart;
+      window.__lastChart = now;
+      return settled;
+    },
+    null,
+    { polling: 150 },
+  );
   const box = await page.getByTestId("chart").boundingBox();
   const radius = (Math.min(box.width, box.height) / 2) * 0.67;
   const angle = (mid / total) * 2 * Math.PI;
@@ -170,6 +182,7 @@ async function runFlow(name, options, chromiumPath, pg) {
   const server = await startServer(pg.url(dbName));
   const browser = await chromium.launch({ executablePath: chromiumPath, args: ["--no-sandbox"] });
   const problems = [];
+  let lastShot = "none yet";
   try {
     const context = await browser.newContext({ ...options, colorScheme: "light", locale: "en-US", timezoneId: "America/New_York" });
     const page = await context.newPage();
@@ -187,6 +200,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     let step = 0;
     const shot = async (label, { fullPage = false } = {}) => {
       step += 1;
+      lastShot = label;
       // A full page is drawn from the top; scrolled, the sticky top bar lands mid-page.
       if (fullPage) await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(450); // let chart animations settle
@@ -361,7 +375,8 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(events[1].rule?.when?.merchant?.equals === "uber eats", "rule definition logged");
 
     // 9. The other report: bars stacked by category, listed under the chart as its legend. A
-    //    tap in the last month's column, above its bar, opens the category donut for that month.
+    //    tap on a category in the list stacks the bars by its subcategories; a tap in the last
+    //    month's column, above its bar, opens the category donut for that month, at that category.
     //    Leaving a custom range for it selects only its preset and closes the custom dates.
     await page.getByTestId("range-custom").click();
     await page.locator(".custom-range").waitFor();
@@ -372,9 +387,17 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(!(await page.locator(".custom-range").count()), "custom dates closed after switching report");
     await page.locator('[data-testid=ranked-row][data-key="rent-and-utilities"]').waitFor();
     await shot("monthly");
+    const monthlyRange = page.url();
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink"]').click();
+    await page.locator('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]').waitFor();
+    assert(urlParams().r === "monthly-trend" && urlParams().p === "food-and-drink", `a category drills the monthly report (${page.url()})`);
+    assert(urlParams().range === new URL(monthlyRange).searchParams.get("range"), "the drill keeps the range");
+    assert((await crumbs()).includes("Food"), "the breadcrumb names the category");
+    await shot("monthly-food");
     const bars = await page.getByTestId("chart").boundingBox();
     await page.mouse.click(bars.x + bars.width - 26, bars.y + 30);
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
+    assert(urlParams().p === "food-and-drink", `the month opens at the same category (${page.url()})`);
     const month = await range();
     assert(urlParams().from === month.from && urlParams().to === month.to && !urlParams().range, "a month is a custom range in the URL");
     assert(month.from.endsWith("-01") && month.from.slice(0, 7) === month.to.slice(0, 7), `opened one month (${month.from} – ${month.to})`);
@@ -382,8 +405,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("txn").first().waitFor();
     await shot("monthly-to-month");
 
-    // 10. Drill to a merchant: category, subcategory, then the biggest merchant narrows the list.
-    await page.locator('[data-testid=ranked-row][data-key="food-and-drink"]').click();
+    // 10. Drill on to a merchant: subcategory, then the biggest merchant narrows the list.
     await page.locator('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]').click();
     await page.waitForFunction(() => document.querySelector("[data-testid=breadcrumbs]")?.textContent?.includes("Restaurants"));
     await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="food-and-drink.restaurant"]'));
@@ -470,6 +492,10 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "90d");
     assert(accountsParam() === "jordan,sam", "a range keeps the accounts");
     await page.getByTestId("ranked-row").first().click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.has("p"));
+    assert(accountsParam() === "jordan,sam", "a drill keeps the accounts");
+    const monthBars = await page.getByTestId("chart").boundingBox();
+    await page.mouse.click(monthBars.x + monthBars.width - 26, monthBars.y + 30);
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "spending-by-category");
     assert(accountsParam() === "jordan,sam", "a link to another report keeps the accounts");
     await page.goBack();
@@ -481,6 +507,10 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(accountsParam() === null && (await page.getByTestId("accounts-toggle").innerText()).includes("All accounts"), "a fresh load without the filter shows all accounts");
 
     await context.close();
+  } catch (err) {
+    // CI keeps no screenshots of a failed run: say where it stopped.
+    err.stack = `${name}, after screenshot "${lastShot}": ${err.stack}`;
+    throw err;
   } finally {
     await browser.close();
     await server.stop();
@@ -505,6 +535,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err.message ?? err);
+  console.error(err.stack ?? err);
   process.exit(1);
 });

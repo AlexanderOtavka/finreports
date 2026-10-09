@@ -8,7 +8,7 @@ import { SampleAdapter } from "../src/server/adapters/sample.js";
 import { buildApp } from "../src/server/app.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
 import { SyncService } from "../src/server/sync.js";
-import type { AccountDto, CategoryDto, ReportData, TxnDto } from "../src/shared/api.js";
+import type { AccountDto, CategoryDto, ReportData, ReportRow, TxnDto } from "../src/shared/api.js";
 import { merchantRule } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
@@ -183,30 +183,54 @@ describe("API (sample backend, dev auth bypass)", async () => {
     expect(food.total).toBeCloseTo(jordan.rows.find((r) => r.key === "food-and-drink")!.value, 2);
     const months = await run("monthly-trend", { accounts: ["jordan"] });
     const sept = await run("spending-by-category", { from: "2026-09-01", to: "2026-09-30", accounts: ["jordan"] });
-    const septBar = months.rows.filter((r) => r.key === "2026-09").reduce((sum, r) => sum + r.value, 0);
+    const septBar = (months.rows as Array<ReportRow & { month: string }>).filter((r) => r.month === "2026-09").reduce((sum, r) => sum + r.value, 0);
     expect(septBar).toBeGreaterThan(0);
     expect(septBar).toBeCloseTo(sept.total, 2);
   });
 
   it("runs the monthly trend report", async () => {
     const months = await run("monthly-trend");
-    expect(months.levels).toBe(1);
+    expect(months.levels).toBe(3);
     // One row per month and category, for the stacked bars.
-    expect(new Set(months.rows.map((r) => r.key)).size).toBe(12);
-    const sept = months.rows.filter((r) => r.key === "2026-09");
+    const cells = months.rows as Array<ReportRow & { month: string }>;
+    expect(new Set(cells.map((r) => r.month)).size).toBe(12);
+    const sept = cells.filter((r) => r.month === "2026-09");
     expect(sept.length).toBeGreaterThan(3);
-    expect(sept.every((r) => typeof r.top_id === "string" && r.label === "Sep 2026")).toBe(true);
-    // A month's bar adds up to the category report for that month.
+    expect(new Set(sept.map((r) => r.key)).size).toBe(sept.length);
+    // A month's bar adds up to the category report for that month, category by category.
     const cats = await run("spending-by-category", { from: "2026-09-01", to: "2026-09-30" });
     expect(sept.reduce((sum, r) => sum + r.value, 0)).toBeCloseTo(cats.total, 2);
+    for (const r of sept) expect(r.value).toBeCloseTo(cats.rows.find((c) => c.key === r.key)!.value, 2);
   });
 
-  it("links a month to the category report for that month, clipped to the range", () => {
+  it("drills the monthly trend report as the category report does", async () => {
+    const sept = { from: "2026-09-01", to: "2026-09-30" };
+    for (const path of [["food-and-drink"], ["food-and-drink", "food-and-drink.restaurant"]]) {
+      const months = await run("monthly-trend", { path });
+      expect(months.level).toBe(path.length);
+      expect(months.breadcrumbs.map((b) => b.label)).toEqual((await run("spending-by-category", { path })).breadcrumbs.map((b) => b.label));
+      // September's bar, stacked by subcategory (or merchant), is the donut for September.
+      const bar = (months.rows as Array<ReportRow & { month: string }>).filter((r) => r.month === "2026-09");
+      const donut = await run("spending-by-category", { ...sept, path });
+      expect(bar.length).toBe(donut.rows.length);
+      for (const r of bar) expect(r.value).toBeCloseTo(donut.rows.find((d) => d.key === r.key)!.value, 2);
+    }
+    // A merchant picked at the last level narrows the list to it.
+    const restaurants = await run("monthly-trend", { path: ["food-and-drink", "food-and-drink.restaurant"] });
+    const merchant = monthlyTrend.listRows!(restaurants)[0]!;
+    const path = ["food-and-drink", "food-and-drink.restaurant", merchant.key];
+    expect((await run("monthly-trend", { path })).breadcrumbs.at(-1)!.label).toBe(merchant.label);
+    expect((await listed("monthly-trend", { path })).every((t) => t.merchantKey === merchant.key)).toBe(true);
+  });
+
+  it("links a month to the category report for that month, clipped to the range, at the same drill path", () => {
     const ctx = { from: "2025-10-15", to: "2026-09-20", path: [] };
     expect(monthlyTrend.link!("2026-02", ctx)).toEqual({ reportId: "spending-by-category", from: "2026-02-01", to: "2026-02-28", path: [] });
     expect(monthlyTrend.link!("2025-10", ctx)).toMatchObject({ from: "2025-10-15", to: "2025-10-31" });
     expect(monthlyTrend.link!("2026-09", ctx)).toMatchObject({ from: "2026-09-01", to: "2026-09-20" });
-    expect(monthlyTrend.link!("food-and-drink", ctx)).toEqual({ reportId: "spending-by-category", from: ctx.from, to: ctx.to, path: ["food-and-drink"] });
+    expect(monthlyTrend.link!("2026-09", { ...ctx, path: ["food-and-drink"] })).toMatchObject({ path: ["food-and-drink"] });
+    // A category drills instead.
+    expect(monthlyTrend.link!("food-and-drink", ctx)).toBeNull();
   });
 
   it("requires a CSRF token for writes", async () => {
