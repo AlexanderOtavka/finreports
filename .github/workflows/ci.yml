@@ -23,7 +23,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/determinate-nix-action@v3
 
@@ -36,7 +36,7 @@ jobs:
         if: always()
         run: nix build .#checks.x86_64-linux.smoke --out-link smoke-output || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-screenshots
@@ -59,7 +59,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/determinate-nix-action@v3
 
@@ -93,7 +93,7 @@ jobs:
 
       - name: Log in to GHCR
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
