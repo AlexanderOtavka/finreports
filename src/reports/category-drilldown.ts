@@ -1,4 +1,5 @@
 import type { ReportData, ReportRow } from "../shared/api.js";
+import { sumRows } from "./run.js";
 import type { ChartTheme, ReportDefinition } from "./types.js";
 
 /**
@@ -14,7 +15,7 @@ const OTHER_KEY = "__other__";
 function sliceColor(data: ReportData, row: ReportRow, index: number, theme: ChartTheme): string | null {
   if (data.level === 0) return theme.categoryColor(row.key);
   const top = data.breadcrumbs[1]?.key ?? "";
-  return theme.shadeOf(theme.categoryColor(top) ?? theme.neutral, row.key, index);
+  return theme.shadeOf(theme.categoryColor(top) ?? theme.neutral, index);
 }
 
 const CENTER_NOUN = ["spent", "in this category", "in this subcategory"];
@@ -26,45 +27,12 @@ const report: ReportDefinition = {
   defaultRange: "30d",
   description: "Where the money went, by category, subcategory and merchant. Refunds net against spending.",
   rootLabel: "All spending",
-  baseFilter: "t.spend <> 0",
+  baseFilter: (t) => t.spend !== 0,
   levels: [
-    {
-      name: "Category",
-      query: (where) => `
-        SELECT t.top_id AS key, t.top_name AS label, sum(t.spend)::float8 AS value
-        FROM report_txn t
-        WHERE ${where}
-        GROUP BY t.top_id, t.top_name
-        HAVING sum(t.spend) > 0
-        ORDER BY value DESC, label`,
-      filter: (key, { p }) => `t.top_id = ${p(key)}`,
-    },
-    {
-      name: "Subcategory",
-      query: (where) => `
-        SELECT t.leaf_id AS key, t.leaf_name AS label, sum(t.spend)::float8 AS value
-        FROM report_txn t
-        WHERE ${where}
-        GROUP BY t.leaf_id, t.leaf_name
-        HAVING sum(t.spend) > 0
-        ORDER BY value DESC, label`,
-      filter: (key, { p }) => `t.leaf_id = ${p(key)}`,
-    },
-    {
-      // Merchants as rules see them (the merchant key); named by the backend's merchant name
-      // where it has one, else by the key.
-      name: "Merchant",
-      query: (where) => `
-        SELECT t.merchant_key AS key,
-               coalesce(mode() WITHIN GROUP (ORDER BY nullif(btrim(t.merchant), '')), initcap(t.merchant_key)) AS label,
-               sum(t.spend)::float8 AS value
-        FROM report_txn t
-        WHERE ${where}
-        GROUP BY t.merchant_key
-        HAVING sum(t.spend) > 0
-        ORDER BY value DESC, label`,
-      filter: (key, { p }) => `t.merchant_key = ${p(key)}`,
-    },
+    { name: "Category", key: (t) => t.topId, rows: (txns) => sumRows(txns, (t) => t.topId, (t) => t.topName) },
+    { name: "Subcategory", key: (t) => t.leafId, rows: (txns) => sumRows(txns, (t) => t.leafId, (t) => t.leafName) },
+    // Merchants as rules see them (the merchant key), named as most of their transactions are.
+    { name: "Merchant", key: (t) => t.merchantKey, rows: (txns) => sumRows(txns, (t) => t.merchantKey, (t) => t.merchant) },
   ],
 
   rowColor: (data, row, index, theme) => sliceColor(data, row, index, theme) ?? theme.other,
@@ -73,15 +41,16 @@ const report: ReportDefinition = {
     // A donut stays readable with a handful of slices: rows without a color of their own (small
     // categories, or past the seventh shade) fold into one "Other" slice. The ranked list under
     // the chart still shows (and drills into) every row.
-    const slices: Array<{ name: string; value: number; key: string; itemStyle: { color: string } }> = [];
+    const slices: Array<{ id: string; name: string; value: number; key: string; itemStyle: { color: string } }> = [];
     const folded: ReportRow[] = [];
     data.rows.forEach((row, i) => {
       const color = sliceColor(data, row, i, theme);
-      if (color) slices.push({ name: row.label, value: row.value, key: row.key, itemStyle: { color } });
+      if (color) slices.push({ id: row.key, name: row.label, value: row.value, key: row.key, itemStyle: { color } });
       else folded.push(row);
     });
     if (folded.length > 0) {
       slices.push({
+        id: OTHER_KEY,
         name: folded.length === 1 ? folded[0]!.label : `${folded.length} more`,
         value: folded.reduce((sum, row) => sum + row.value, 0),
         key: OTHER_KEY,
@@ -112,6 +81,9 @@ const report: ReportDefinition = {
       },
       series: [
         {
+          // One donut per drill path: a new range or set of accounts turns the slices to their
+          // new sizes; a drill draws the next level's donut fresh.
+          id: `donut:${data.breadcrumbs.slice(1, data.level + 1).map((b) => b.key).join("/")}`,
           type: "pie",
           radius: ["52%", "82%"],
           center: ["50%", "50%"],

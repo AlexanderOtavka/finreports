@@ -36,6 +36,10 @@ gray and fold into "Other"). Subcategories and merchants are shades of their cat
 The biggest one wears the hue itself, and the rest alternate lighter and darker so that
 neighboring slices stand apart.
 
+The chart and the list are computed from scratch from the report, range, accounts and drill
+path, every time any of them changes: the same view always looks the same, however you got
+there.
+
 ## Quick start
 
 With [Nix](https://nixos.org/download) and flakes:
@@ -79,13 +83,16 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
     connector writes, so Firefly's categories map back by name.
   - `rule` + `rule_version`: rules as JSON (`src/shared/rules.ts`), every version kept.
   - `decision_event`: append-only (triggers refuse UPDATE, DELETE and TRUNCATE).
-  - `report_txn`: the view every report queries.
+  - `report_txn`: the transactions with their category's place in the tree and their
+    spending, for the server's own queries (the reports compute the same in the browser).
 - **Sync loop** (`src/server/sync.ts`): every `SYNC_INTERVAL_SECONDS`, pull changes through
   the adapter into `txn`, run the rules over new and changed transactions, and write locally
   decided categories back through the adapter. A failed write stays queued (`backend_dirty`)
   and is retried. A full listing every `FULL_SYNC_INTERVAL_HOURS` notices deletions.
 - **Web app** (`src/web/`): Vite + React + ECharts, built into `dist/web` and served by the
-  same Fastify server under `/reports/`. Installable as a PWA. It borrows Firefly III's look
+  same Fastify server under `/reports/`. It loads every transaction once (`/api/transactions`,
+  gzipped) and runs the reports itself, so a new report, range, set of accounts or drill path
+  recomputes the chart and the list from scratch, with no request. Installable as a PWA. It borrows Firefly III's look
   (AdminLTE's blue navbar and boxes) so it sits comfortably next to it.
 
 ## Categories, rules and provenance
@@ -121,33 +128,36 @@ curl … '/reports/api/decision-events.jsonl?after=1234'   # only events after i
 
 ## Adding a report
 
-Reports are code: one file per report in `src/reports/`.
+Reports are code: one file per report in `src/reports/`, run in the browser over every
+transaction (`src/reports/run.ts`).
 
 1. Copy `src/reports/monthly-trend.ts` to `src/reports/<your-report>.ts`.
 2. Fill in the `ReportDefinition` (`src/reports/types.ts`):
-   - `baseFilter`: SQL over `report_txn t` that every transaction in the report satisfies.
-   - `levels`: one entry per drill level. `query(where)` returns rows of `key`, `label`,
-     `value` (`SELECT … FROM report_txn t WHERE ${where} GROUP BY …`); `where` already holds
-     the date range, the base filter, and the keys tapped above. `filter(key, { p })` is the
-     condition for the transactions behind `key`; bind values with `p(value)`, never by
-     pasting them into SQL.
-   - `chart(data, theme, selectedKey)`: an ECharts option. Give each datum a `key`, so a tap
-     drills (or, on the last level, selects). On a column chart, give the category axis
-     entries a `key` instead (`{ value: "Sep", key: "2026-09" }`) and a tap anywhere in the
-     column counts. Colors: `theme.categoryColor(topId)` for top-level categories (null for
-     the small ones: use `theme.other`), `theme.shadeOf(base, key, index)` for rows inside
-     one, and `theme.colorFor(key, index)` for anything else. Return the same color from
-     `rowColor` so the list under the chart matches.
+   - `baseFilter(txn)`: whether the report counts a transaction at all.
+   - `levels`: one entry per drill level. `key(txn)` is the key a transaction files under at
+     this level (a tap on that key narrows to the transactions with it); `rows(txns)` returns
+     the level's rows of `key`, `label`, `value` from the transactions in the range, the
+     accounts and under the keys tapped above. `sumRows(txns, key, label)` sums the spending
+     per key.
+   - `chart(data, theme, selectedKey)`: the whole ECharts option, from scratch; nothing of
+     the last one stays. Give each series an `id`: a series with the same id as one on screen
+     animates to its new values. Give each datum a `key`, so a tap drills (or, on the last
+     level, selects). On a column chart, give the category axis entries a `key` instead
+     (`{ value: "Sep", key: "2026-09" }`) and a tap anywhere in the column counts. Colors:
+     `theme.categoryColor(topId)` for top-level categories (null for the small ones: use
+     `theme.other`), `theme.shadeOf(base, index)` for rows inside one, and
+     `theme.colorFor(index)` for anything else. Return the same color from `rowColor` so the
+     list under the chart matches.
    - Optional: `link(key, ctx)` makes a tap open another report, range and drill path instead
      of drilling. `listRows(data)` lists other rows under the chart (a stacked chart lists its
      series, as its legend).
 3. Add it to `REPORTS` in `src/reports/index.ts`.
 
-`report_txn` has `id, date, amount` (signed, negative is money out), `spend` (money out as a
-positive number, refunds negative, zero for transfers and income), `type, pending, merchant,
-description, account_name, category_id, provenance, top_id, top_name, leaf_id, leaf_name,
-kind, merchant_key, account_id`. The breadcrumb, the transaction list under the chart, and the recategorize sheet come
-with every report; nothing else needs touching.
+A report's transactions (`ReportTxn`) are the list's transactions (`TxnDto`: `id, date,
+amount` (signed, negative is money out), `merchant, merchantKey, accountId, categoryId`, …)
+plus `spend` (money out as a positive number, refunds negative, zero for transfers and
+income), `topId, topName, leafId, leafName, kind`. The breadcrumb, the transaction list under
+the chart, and the recategorize sheet come with every report; nothing else needs touching.
 
 ## Configuration
 
