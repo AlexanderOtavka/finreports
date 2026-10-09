@@ -21,7 +21,9 @@ amount, the bank's raw description, account, notes, tags, website), so `trader s
 Trader Joe's in September. `"Quoted words"` stay together, and a number is a whole number
 (`20` is the 20th or $20, not 2025). Matches are highlighted; a word found only in a field
 the list does not show (a note, a tag) brings that field up under the row. Search keeps the
-chart's range and drill path (it says which, under the bar). In a transaction, the merchant's
+chart's range and drill path (it says which, under the bar). The list's header adds up what it lists, all
+of it or the matches: the net, then money in − money out when there is some of each, so a
+search for a card shows its refunds next to its charges. In a transaction, the merchant's
 name searches the list for that merchant, in place, and "Look up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
 website and location for the merchant, and the ledger's notes and tags, are shown there too.
 

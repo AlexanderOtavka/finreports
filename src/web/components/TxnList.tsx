@@ -46,6 +46,41 @@ function SearchIcon() {
   );
 }
 
+/** In cents, so that adding up thousands of amounts stays exact. */
+function totals(txns: TxnDto[]): { net: number; in: number; out: number } {
+  let inflow = 0;
+  let outflow = 0;
+  for (const t of txns) {
+    const cents = Math.round(t.amount * 100);
+    if (cents > 0) inflow += cents;
+    else outflow -= cents;
+  }
+  return { net: (inflow - outflow) / 100, in: inflow / 100, out: outflow / 100 };
+}
+
+/** The net of the transactions listed, then (when both kinds are there) money in − money out. */
+function Totals({ txns }: { txns: TxnDto[] }) {
+  const sum = useMemo(() => totals(txns), [txns]);
+  const sign = sum.net > 0 ? "+" : sum.net < 0 ? "−" : "";
+  return (
+    <span className="txn-totals" data-testid="txn-totals" data-net={sum.net} data-in={sum.in} data-out={sum.out}>
+      <span className="txn-totals-label">Net</span>{" "}
+      <strong className={sum.net > 0 ? "inflow" : sum.net < 0 ? "outflow" : undefined} data-testid="txn-totals-net">
+        {sign}
+        {formatMoney(Math.abs(sum.net))}
+      </strong>
+      {sum.in > 0 && sum.out > 0 && (
+        <>
+          {" "}
+          <span className="txn-totals-parts" data-testid="txn-totals-parts">
+            (<span className="inflow">+{formatMoney(sum.in)}</span> − <span className="outflow">{formatMoney(sum.out)}</span>)
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
 /** Rows drawn at first, and added each time the end of the list comes near. */
 const PAGE = 100;
 
@@ -115,8 +150,9 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
     </div>
   ) : (
     <h2 className="section-title">
-      <span>
-        Transactions {!loading && <span className="muted">· {total.toLocaleString("en-US")}</span>}
+      <span className="section-title-text">
+        <span>Transactions {!loading && <span className="muted">· {total.toLocaleString("en-US")}</span>}</span>
+        {!loading && total > 0 && <Totals txns={items} />}
       </span>
       <button type="button" className="txn-search-open" onClick={() => onSearch("")} aria-label="Search transactions" title="Search transactions" data-testid="txn-search-open">
         <SearchIcon />
@@ -151,6 +187,12 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
                 `Searching all ${total.toLocaleString("en-US")} transactions in `
               )}
               <span className="txn-search-scope" data-testid="txn-search-scope">{scope}</span>
+              {shown.length > 0 && (
+                <>
+                  <br />
+                  <Totals txns={shown} />
+                </>
+              )}
             </p>
           )}
         </div>

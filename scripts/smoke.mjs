@@ -260,6 +260,11 @@ async function runFlow(name, options, chromiumPath, pg) {
     const days = await page.locator(".txn-date").allInnerTexts();
     assert(days.every((d) => d.startsWith(mon)), `all on days in ${mon} (${days})`);
     assert((await txnTexts()).every((t) => t.includes("Trader Joe")), "and all still Trader Joe's");
+    // The header adds up the matches (all drawn: one month is under a page).
+    const amounts = await page.locator("[data-testid=txn] .txn-amount").allInnerTexts();
+    const cents = amounts.reduce((sum, a) => sum + (a.startsWith("+") ? 1 : -1) * Math.round(Number(a.replace(/[^\d.]/g, "")) * 100), 0);
+    const net = Number(await page.getByTestId("txn-totals").getAttribute("data-net"));
+    assert(amounts.length === tradersInMonth && Math.round(net * 100) === cents, `the net is the matches' sum (${net}, ${cents / 100})`);
     await shot("search-compound", { fullPage: true });
     // A word the row does not show (the cat's name, in the vet visits' notes): the field it is
     // in is shown under the row.
