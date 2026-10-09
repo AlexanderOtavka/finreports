@@ -152,6 +152,18 @@ async function tapSlice(page, base, reportId, ctx, key, touch) {
     start += r.value;
   }
   assert(mid !== null, `slice ${key} has a slice of its own`);
+  // A new donut sweeps in clockwise: until it has, a tap where a later slice will be hits
+  // nothing. Wait for the drawing to stop changing.
+  await page.waitForFunction(
+    () => {
+      const now = document.querySelector("[data-testid=chart] canvas")?.toDataURL();
+      const settled = now !== undefined && now === window.__lastChart;
+      window.__lastChart = now;
+      return settled;
+    },
+    null,
+    { polling: 150 },
+  );
   const box = await page.getByTestId("chart").boundingBox();
   const radius = (Math.min(box.width, box.height) / 2) * 0.67;
   const angle = (mid / total) * 2 * Math.PI;
@@ -170,6 +182,7 @@ async function runFlow(name, options, chromiumPath, pg) {
   const server = await startServer(pg.url(dbName));
   const browser = await chromium.launch({ executablePath: chromiumPath, args: ["--no-sandbox"] });
   const problems = [];
+  let lastShot = "none yet";
   try {
     const context = await browser.newContext({ ...options, colorScheme: "light", locale: "en-US", timezoneId: "America/New_York" });
     const page = await context.newPage();
@@ -187,6 +200,7 @@ async function runFlow(name, options, chromiumPath, pg) {
     let step = 0;
     const shot = async (label, { fullPage = false } = {}) => {
       step += 1;
+      lastShot = label;
       // A full page is drawn from the top; scrolled, the sticky top bar lands mid-page.
       if (fullPage) await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(450); // let chart animations settle
@@ -493,6 +507,10 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert(accountsParam() === null && (await page.getByTestId("accounts-toggle").innerText()).includes("All accounts"), "a fresh load without the filter shows all accounts");
 
     await context.close();
+  } catch (err) {
+    // CI keeps no screenshots of a failed run: say where it stopped.
+    err.stack = `${name}, after screenshot "${lastShot}": ${err.stack}`;
+    throw err;
   } finally {
     await browser.close();
     await server.stop();
@@ -517,6 +535,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err.message ?? err);
+  console.error(err.stack ?? err);
   process.exit(1);
 });
