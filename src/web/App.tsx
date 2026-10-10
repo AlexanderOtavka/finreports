@@ -306,6 +306,11 @@ export function App() {
             </a>
           </h1>
           {session?.devBypass && <span className="dev-badge" title="DEV_AUTH_BYPASS is on">dev</span>}
+          {session?.demo && (
+            <span className="dev-badge" title="A public demo on generated sample data. Changes are lost when it restarts.">
+              demo
+            </span>
+          )}
           {session && session.navLinks.length > 0 && (
             <nav className="nav-links" aria-label="Other apps">
               {session.navLinks.map((l) => (

@@ -1,0 +1,70 @@
+name: Infra
+
+# OpenTofu on infra/: a plan on pull requests (read-only, in the job summary), an apply on
+# main (in the `infra` environment, which only main may use). infra/README.md has the setup.
+on:
+  pull_request:
+    paths: &paths
+      - infra/**
+      - nix/infra.nix
+      - flake.nix
+      - flake.lock
+      - .github/workflows/infra.yml
+  push:
+    branches:
+      - main
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VAR_billing_account: ${{ vars.GCP_BILLING_ACCOUNT }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: infra-plan@finreports-firefly.iam.gserviceaccount.com
+
+      # No lock: the plan account can read the state but not write the lock file.
+      - name: tofu plan
+        run: |
+          set -euo pipefail
+          nix run .#infra -- plan -lock=false -input=false -no-color 2>&1 | tee plan.txt
+          { echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment: infra
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: infra-apply@finreports-firefly.iam.gserviceaccount.com
+
+      - name: tofu apply
+        run: |
+          set -euo pipefail
+          nix run .#infra -- apply -auto-approve -input=false -no-color 2>&1 | tee apply.txt
+          { echo '```'; cat apply.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

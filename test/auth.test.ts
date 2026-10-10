@@ -145,3 +145,50 @@ describe("OAuth login", async () => {
     expect(parseCookies("a=1; b=%ZZ; a=2; c=x=y")).toEqual({ a: "1", c: "x=y" });
   });
 });
+
+describe("demo mode", async () => {
+  const db = await freshDb();
+  const config = loadConfig({
+    BACKEND: "sample",
+    DEMO_MODE: "true",
+    // As the demo image sets it.
+    NODE_ENV: "production",
+    WEB_ROOT: "/nonexistent",
+    LOG_LEVEL: "silent",
+  });
+  const adapter = new SampleAdapter(db, { seed: 1, endDate: "2026-09-30" });
+  const sync = new SyncService(db, adapter, silentLog, { intervalMs: 1000, fullIntervalMs: 1000 });
+  const app = await buildApp({ config, db, adapter, sync });
+  afterAll(() => app.close());
+
+  it("logs everyone in as the demo user, on any host", async () => {
+    for (const host of ["pr-16---finreports-demo-abc123-uc.a.run.app", "finreports-demo-abc123-uc.a.run.app"]) {
+      const me = await app.inject({ method: "GET", url: "/reports/api/session", headers: { host } });
+      expect(me.statusCode).toBe(200);
+      expect(me.json()).toMatchObject({ email: "demo@example.com", demo: true, devBypass: false });
+    }
+  });
+
+  it("skips the Firefly login", async () => {
+    const res = await app.inject({ method: "GET", url: "/reports/auth/login?next=/reports/", headers: { host: "x.run.app" } });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe("/reports/");
+  });
+
+  it("still wants the CSRF token on writes", async () => {
+    const write = await app.inject({ method: "POST", url: "/reports/api/categories", payload: { name: "X", parentId: null }, headers: { host: "x.run.app" } });
+    expect(write.statusCode).toBe(403);
+  });
+});
+
+describe("config guards demo mode", () => {
+  it("refuses it with the Firefly backend", () => {
+    expect(() => loadConfig({ BACKEND: "firefly", FIREFLY_TOKEN: "x", DEMO_MODE: "true" })).toThrow(/sample backend only/);
+  });
+  it("refuses a casual value", () => {
+    expect(() => loadConfig({ BACKEND: "sample", DEMO_MODE: "1" })).toThrow(/must be unset or "true"/);
+  });
+  it("needs no login settings", () => {
+    expect(loadConfig({ BACKEND: "sample", DEMO_MODE: "true", NODE_ENV: "production" }).auth.demo).toBe(true);
+  });
+});

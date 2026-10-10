@@ -186,6 +186,7 @@ e.g. a mounted Kubernetes Secret).
 | `NAV_LINKS` | none | Links to other apps in the top bar, as JSON: `[{"label": "Ledger", "url": "/"}, {"label": "Bank sync", "url": "https://bank-sync.example.com", "newTab": true}]`. A URL is `http(s)://…` or a path on this origin; `newTab` is optional. |
 | `SAMPLE_SEED`, `SAMPLE_END_DATE` | `235`, today | The sample dataset. |
 | `DEV_AUTH_BYPASS` | unset | See below. |
+| `DEMO_MODE` | unset | `true` for the public demo. See below. |
 | `LOG_LEVEL` | `info` | |
 
 ### Dev-only auth bypass
@@ -194,6 +195,20 @@ e.g. a mounted Kubernetes Secret).
 and accepts `localhost` as a host. It exists for local development and the smoke tests, and
 the service refuses to start with it when `BACKEND=firefly`, when `NODE_ENV=production` (the
 image sets that), or when it has any other value. The UI shows a "dev" badge while it is on.
+
+### Public demo
+
+`DEMO_MODE=true` logs every request in as `demo@example.com`, on any host, without the
+Firefly login, also with `NODE_ENV=production`; the service refuses it with any backend but
+`sample`. The UI shows a "demo" badge. The demo image (`nix build .#demo-container`) sets it,
+and runs its own PostgreSQL in `/tmp`, so it needs nothing else:
+
+```bash
+docker run -p 8080:8080 --read-only --tmpfs /tmp ghcr.io/alexanderotavka/finreports:demo
+```
+
+CI deploys main's demo, and one for each pull request, to Google Cloud Run's free tier; the
+setup is in [`infra/`](infra/README.md).
 
 ## Login and security
 

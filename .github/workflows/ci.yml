@@ -15,6 +15,8 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/alexanderotavka/finreports
+  # Artifact Registry's pull-through cache of the same package (infra/demo.nix).
+  DEMO_IMAGE_NAME: us-central1-docker.pkg.dev/finreports-firefly/ghcr/alexanderotavka/finreports
 
 permissions:
   contents: read
@@ -46,6 +48,12 @@ jobs:
   container:
     needs: check
     runs-on: ubuntu-latest
+    outputs:
+      demo-digest: ${{ steps.demo.outputs.digest }}
+    env:
+      # Main, and pull requests from this repository: forks and Dependabot get a read-only
+      # token, so no image and no demo.
+      PUBLISH_DEMO: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
     services:
       postgres:
         image: postgres:17
@@ -63,10 +71,12 @@ jobs:
 
       - uses: DeterminateSystems/determinate-nix-action@v3
 
-      - name: Build and load the image
+      - name: Build and load the images
         run: |
           nix build .#container --out-link container.tar.gz
           docker load < container.tar.gz
+          nix build .#demo-container --out-link demo-container.tar.gz
+          docker load < demo-container.tar.gz
 
       - name: Check the image runs as uid 1000 with a read-only root
         env:
@@ -91,8 +101,29 @@ jobs:
           docker logs app
           docker rm -f app
 
+      - name: Check the demo image runs alone and lets anyone in
+        env:
+          IMAGE: finreports-demo:latest
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "1000:1000"
+          docker run -d --name demo -p 8081:8080 --read-only --tmpfs /tmp "$IMAGE"
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8081/reports/-/healthz && break
+            sleep 1
+          done
+          curl -sf -H 'Host: pr-1---finreports-demo-x.a.run.app' http://localhost:8081/reports/api/session |
+            jq -e '.email == "demo@example.com" and .demo == true'
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8081/reports/api/status | jq -e '.txns > 1000' && break
+            sleep 1
+          done
+          curl -sf http://localhost:8081/reports/api/status | jq -e '.txns > 1000'
+          docker logs demo
+          docker rm -f demo
+
       - name: Log in to GHCR
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || env.PUBLISH_DEMO == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -108,9 +139,70 @@ jobs:
             docker push "${IMAGE_NAME}:${tag}"
           done
           echo "Published \`${IMAGE_NAME}@$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_NAME}:sha-${GITHUB_SHA}" | cut -d@ -f2)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Into the same public package, as demo-* tags, which Cloud Run pulls through Artifact
+      # Registry: a new package would start out private.
+      - name: Publish the demo image as demo-sha-<commit> (and demo, on main)
+        id: demo
+        if: env.PUBLISH_DEMO == 'true'
+        run: |
+          set -euo pipefail
+          tags=("demo-sha-${GITHUB_SHA}")
+          if [ "$GITHUB_REF" = refs/heads/main ]; then tags+=(demo); fi
+          for tag in "${tags[@]}"; do
+            docker tag finreports-demo:latest "${IMAGE_NAME}:${tag}"
+            docker push "${IMAGE_NAME}:${tag}"
+          done
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_NAME}:demo-sha-${GITHUB_SHA}" | cut -d@ -f2)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Published \`${IMAGE_NAME}@${digest}\` (demo)" >> "$GITHUB_STEP_SUMMARY"
     permissions:
       contents: read
       packages: write
+
+  # Main's demo takes the service's traffic; a pull request's is a tagged revision with no
+  # traffic, at its own URL, shown on the PR as a deployment. preview-cleanup.yml removes the
+  # tag when the PR closes. Skipped until infra/ is bootstrapped (infra/README.md).
+  demo:
+    needs: container
+    if: needs.container.outputs.demo-digest != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'demo-pr' || 'demo' }}
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: preview-deployer@finreports-firefly.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy
+        id: deploy
+        env:
+          IMAGE: ${{ env.DEMO_IMAGE_NAME }}@${{ needs.container.outputs.demo-digest }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          service=(finreports-demo --region us-central1 --quiet)
+          # Two deploys at once (two PRs) can conflict on the service; the loser retries.
+          retry() { for i in 1 2 3 4; do "$@" && return; sleep $((i * 15)); done; "$@"; }
+          if [ -n "$PR" ]; then
+            retry gcloud run deploy "${service[@]}" --image "$IMAGE" --tag "pr-${PR}" --no-traffic
+            url="$(gcloud run services describe "${service[@]}" --format=json |
+              jq -r --arg tag "pr-${PR}" '.status.traffic[] | select(.tag == $tag) | .url')"
+          else
+            retry gcloud run deploy "${service[@]}" --image "$IMAGE"
+            # A PR's --no-traffic deploy pins the traffic to the revision it had; take it back.
+            retry gcloud run services update-traffic "${service[@]}" --to-latest
+            url="$(gcloud run services describe "${service[@]}" --format='value(status.url)')"
+          fi
+          echo "url=${url}/reports/" >> "$GITHUB_OUTPUT"
+          echo "Demo: ${url}/reports/" >> "$GITHUB_STEP_SUMMARY"
 
   # Merges the weekly update once everything above passed on its branch.
   automerge:

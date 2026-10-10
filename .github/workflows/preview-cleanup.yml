@@ -1,0 +1,36 @@
+name: Remove PR demo
+
+# A closed pull request's demo revision loses its tag, and with it its URL. The revision
+# itself stays, serving nothing and costing nothing, until Cloud Run prunes old revisions.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  untag:
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: preview-deployer@finreports-firefly.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Remove the tag
+        env:
+          TAG: pr-${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          service=(finreports-demo --region us-central1 --quiet)
+          if gcloud run services describe "${service[@]}" --format=json |
+            jq -e --arg tag "$TAG" '.status.traffic[] | select(.tag == $tag)' >/dev/null; then
+            gcloud run services update-traffic "${service[@]}" --remove-tags "$TAG"
+          else
+            echo "No ${TAG} demo."
+          fi
