@@ -8,5 +8,7 @@
   repository = "AlexanderOtavka/finreports";
   # GitHub's numeric id survives renames and cannot be claimed by another repository.
   repositoryId = "1406588301";
+  # The owner's (AlexanderOtavka's) id, for the OIDC subject (infra/ci.nix).
+  ownerId = "8042691";
   stateBucket = "finreports-firefly-tofu-state";
 }

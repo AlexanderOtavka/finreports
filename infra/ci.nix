@@ -7,7 +7,9 @@
 # - preview-deployer: deploys revisions of the demo service (demo.nix), from any workflow
 #   of this repository.
 {settings, ...}: let
-  inherit (settings) project repository repositoryId;
+  inherit (settings) project repository repositoryId ownerId;
+  owner = builtins.dirOf repository;
+  name = builtins.baseNameOf repository;
   pool = "\${google_iam_workload_identity_pool.github.name}";
   wholeRepository = "principalSet://iam.googleapis.com/${pool}/attribute.repository_id/${repositoryId}";
   serviceAccount = name: description: {
@@ -34,7 +36,6 @@ in {
     attribute_mapping = {
       "google.subject" = "assertion.sub";
       "attribute.repository_id" = "assertion.repository_id";
-      "attribute.environment" = "assertion.environment";
     };
     # No other repository's token gets in at all.
     attribute_condition = "assertion.repository_id == '${repositoryId}'";
@@ -47,13 +48,13 @@ in {
   };
 
   resource.google_service_account_iam_member = {
-    # Jobs in the `infra` environment, which only main may use. The provider admits this
-    # repository's tokens only. (By the environment claim, not the subject: the subject of a
-    # repository created since mid-2026 has numeric ids in it.)
+    # Jobs in the `infra` environment, which only main may use. GitHub's subject for this
+    # repository has the owner's and the repository's ids in it (`gh api
+    # repos/${repository}/actions/oidc/customization/sub`).
     infra-apply = {
       service_account_id = "\${google_service_account.infra-apply.name}";
       role = "roles/iam.workloadIdentityUser";
-      member = "principalSet://iam.googleapis.com/${pool}/attribute.environment/infra";
+      member = "principal://iam.googleapis.com/${pool}/subject/repo:${owner}@${ownerId}/${name}@${repositoryId}:environment:infra";
     };
     infra-plan = {
       service_account_id = "\${google_service_account.infra-plan.name}";
