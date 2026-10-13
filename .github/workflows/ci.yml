@@ -148,11 +148,13 @@ jobs:
           set -euo pipefail
           tags=("demo-sha-${GITHUB_SHA}")
           if [ "$GITHUB_REF" = refs/heads/main ]; then tags+=(demo); fi
+          # Straight from the Nix-built archive (skopeo reads docker login's credentials),
+          # and the digest of exactly what was pushed.
           for tag in "${tags[@]}"; do
-            docker tag finreports-demo:latest "${IMAGE_NAME}:${tag}"
-            docker push "${IMAGE_NAME}:${tag}"
+            nix run --inputs-from . nixpkgs#skopeo -- --insecure-policy copy --digestfile demo.digest \
+              docker-archive:demo-container.tar.gz "docker://${IMAGE_NAME}:${tag}"
           done
-          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_NAME}:demo-sha-${GITHUB_SHA}" | cut -d@ -f2)"
+          digest="$(cat demo.digest)"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "Published \`${IMAGE_NAME}@${digest}\` (demo)" >> "$GITHUB_STEP_SUMMARY"
     permissions:
@@ -196,9 +198,9 @@ jobs:
             url="$(gcloud run services describe "${service[@]}" --format=json |
               jq -r --arg tag "pr-${PR}" '.status.traffic[] | select(.tag == $tag) | .url')"
           else
-            retry gcloud run deploy "${service[@]}" --image "$IMAGE"
-            # A PR's --no-traffic deploy pins the traffic to the revision it had; take it back.
-            retry gcloud run services update-traffic "${service[@]}" --to-latest
+            # By the tag, not --to-latest: a PR may deploy a later revision meanwhile.
+            retry gcloud run deploy "${service[@]}" --image "$IMAGE" --tag main --no-traffic
+            retry gcloud run services update-traffic "${service[@]}" --to-tags main=100
             url="$(gcloud run services describe "${service[@]}" --format='value(status.url)')"
           fi
           echo "url=${url}/reports/" >> "$GITHUB_OUTPUT"
@@ -225,6 +227,20 @@ jobs:
           if [ -z "$pr" ]; then
             echo "No open update PR at ${GITHUB_SHA}; nothing to merge."
             exit 0
+          fi
+          # Only with a good plan of infra/ against the new providers (update.yml starts it;
+          # its jobs are skipped until infra/ is bootstrapped).
+          infra="$(gh run list --workflow infra.yml --branch automated/update-deps --event workflow_dispatch \
+            --commit "$GITHUB_SHA" --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$infra" ]; then
+            echo "No Infra run at ${GITHUB_SHA}; not merging."
+            exit 1
+          fi
+          gh run watch "$infra" >/dev/null
+          conclusion="$(gh run view "$infra" --json conclusion --jq .conclusion)"
+          if [ "$conclusion" != success ] && [ "$conclusion" != skipped ]; then
+            echo "The Infra plan at ${GITHUB_SHA} ended in ${conclusion}; not merging."
+            exit 1
           fi
           # The PR also gets a pull_request run that waits for approval, as it was opened by a
           # bot, and fails once the PR closes. This run stands in for it, so delete it.

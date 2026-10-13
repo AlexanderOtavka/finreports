@@ -34,6 +34,7 @@ in {
     attribute_mapping = {
       "google.subject" = "assertion.sub";
       "attribute.repository_id" = "assertion.repository_id";
+      "attribute.environment" = "assertion.environment";
     };
     # No other repository's token gets in at all.
     attribute_condition = "assertion.repository_id == '${repositoryId}'";
@@ -46,11 +47,13 @@ in {
   };
 
   resource.google_service_account_iam_member = {
-    # The subject of a job in the `infra` environment, which only main may use.
+    # Jobs in the `infra` environment, which only main may use. The provider admits this
+    # repository's tokens only. (By the environment claim, not the subject: the subject of a
+    # repository created since mid-2026 has numeric ids in it.)
     infra-apply = {
       service_account_id = "\${google_service_account.infra-apply.name}";
       role = "roles/iam.workloadIdentityUser";
-      member = "principal://iam.googleapis.com/${pool}/subject/repo:${repository}:environment:infra";
+      member = "principalSet://iam.googleapis.com/${pool}/attribute.environment/infra";
     };
     infra-plan = {
       service_account_id = "\${google_service_account.infra-plan.name}";

@@ -19,7 +19,7 @@ CI (`.github/workflows/ci.yml`) builds the demo image (`nix/demo-container.nix`:
 with `DEMO_MODE=true` and its own PostgreSQL in `/tmp`), pushes it to GHCR as
 `demo-sha-<commit>`, and deploys it to `finreports-demo` through Artifact Registry's cache:
 
-- **main**: a new revision, taking all of the service's traffic.
+- **main**: a revision with the tag `main`, which then takes all of the service's traffic.
 - **a pull request** from this repository: a revision with the tag `pr-<number>` and no
   traffic, at `https://pr-<number>---finreports-demo-….run.app/reports/`. The PR shows it
   as a deployment to `demo-pr`, with a "View deployment" button. `preview-cleanup.yml`
@@ -57,7 +57,7 @@ environment. Locally, `nix run .#infra -- plan` (or any other `tofu` command) ru
 OpenTofu gets its providers from the Nix store only, at the versions the nixpkgs in
 `flake.lock` has (`init -plugin-dir`, and an exact version constraint): `flake.lock` is the
 lock file, and the weekly update bumps it. Its Infra run plans the new providers on its
-branch, and main applies them after the merge. A provider that nixpkgs does not have fails
+branch, the update merges only if that plan succeeds, and main applies them after the merge. A provider that nixpkgs does not have fails
 `init` rather than being downloaded.
 
 `infra-apply` owns the project, but on the billing account it can only manage budgets: it

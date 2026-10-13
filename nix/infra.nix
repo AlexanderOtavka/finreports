@@ -50,6 +50,8 @@ in
       install -m 644 ${config} "$work/config.tf.json"
 
       init() {
+        # flake.lock pins the providers; a lock from before the last bump would refuse them.
+        rm -f "$work/.terraform.lock.hcl"
         if ! tofu -chdir="$work" init -input=false -no-color -plugin-dir=${pluginDir} >"$work/init.log" 2>&1; then
           cat "$work/init.log" >&2
           exit 1

@@ -45,10 +45,9 @@ def handle(envelope):
         log("INFO", "within budget", cost=cost, currency=notification.get("currencyCode"))
         return
     token = call(TOKEN_URL)["access_token"]
-    if not call(BILLING_INFO, token=token).get("billingEnabled"):
-        log("INFO", "billing already unlinked", cost=cost)
-        return
     log("ALERT", "cost over the limit: unlinking billing", cost=cost, limit=MAX_COST)
+    # Unlinking an unlinked project is fine, so no need to look first (which would also
+    # need permission to read the project).
     call(BILLING_INFO, method="PUT", body={"billingAccountName": ""}, token=token)
     log("ALERT", "billing unlinked", project=PROJECT)
 

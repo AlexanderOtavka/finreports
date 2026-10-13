@@ -35,6 +35,8 @@ async function main(): Promise<void> {
   }
   if (applied.length) app.log.info({ applied }, "migrations applied");
 
+  // Cloud Run gives the demo no CPU between requests: fill the mirror before taking any.
+  if (config.auth.demo) await sync.run();
   await app.listen({ port: config.port, host: config.host });
   if (config.sync.enabled) sync.start();
 

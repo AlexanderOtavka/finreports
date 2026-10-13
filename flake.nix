@@ -57,7 +57,7 @@
     devShells = forAllSystems (pkgs: {
       default = pkgs.mkShell {
         packages =
-          [pkgs.nodejs_22 pkgs.postgresql_17 pkgs.google-cloud-sdk]
+          [pkgs.nodejs_22 pkgs.postgresql_17 pkgs.google-cloud-sdk pkgs.gh]
           ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.chromium;
       };
     });
