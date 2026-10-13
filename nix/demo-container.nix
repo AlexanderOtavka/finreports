@@ -34,12 +34,14 @@
     '';
   };
 in
-  dockerTools.buildLayeredImage {
+  (dockerTools.buildLayeredImage {
     name = "finreports-demo";
     tag = "latest";
-    # initdb and postgres refuse to run as a uid without a passwd entry.
     contents = [
       cacert
+      # initdb and pg_ctl start postgres through /bin/sh.
+      dockerTools.binSh
+      # initdb and postgres refuse to run as a uid without a passwd entry.
       (dockerTools.fakeNss.override {
         extraPasswdLines = ["finreports:x:1000:1000:finreports:/tmp:/bin/false"];
         extraGroupLines = ["finreports:x:1000:"];
@@ -66,4 +68,7 @@ in
         "org.opencontainers.image.licenses" = "MIT";
       };
     };
-  }
+  })
+  .overrideAttrs (old: {
+    passthru = (old.passthru or {}) // {inherit start;};
+  })

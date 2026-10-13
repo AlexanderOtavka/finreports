@@ -1,7 +1,11 @@
 # `nix run .#infra -- <tofu args>`: renders infra/ (Terranix) to config.tf.json in
-# infra/.work, and runs OpenTofu there with the Google provider from nixpkgs, pinned by
-# flake.lock like everything else. State is in the GCS bucket; `infra bootstrap` creates
+# infra/.work, and runs OpenTofu there. State is in the GCS bucket; `infra bootstrap` creates
 # that bucket and runs the first apply. See infra/README.md.
+#
+# Providers come from the Nix store only, pinned by flake.lock like everything else (the
+# weekly `nix flake update` bumps them): `init -plugin-dir` turns off downloads from the
+# registry, and the configuration asks for exactly the version nixpkgs has. There is no
+# .terraform.lock.hcl to commit; flake.lock is the lock file.
 {
   lib,
   system,
@@ -13,6 +17,9 @@
   coreutils,
   git,
 }: let
+  providers = p: [p.hashicorp_google];
+  tofu = opentofu.withPlugins providers;
+  pluginDir = "${tofu}/libexec/terraform-providers";
   settings = import ../infra/settings.nix;
   inherit (settings) project region stateBucket repository;
   config = terranix.lib.terranixConfiguration {
@@ -25,10 +32,13 @@
           bucket = stateBucket;
           prefix = "infra";
         };
+        terraform.required_providers = builtins.listToAttrs (map (p: {
+          name = builtins.baseNameOf p.provider-source-address;
+          value.version = "= ${p.version}";
+        }) (providers opentofu.plugins));
       }
     ];
   };
-  tofu = opentofu.withPlugins (p: [p.hashicorp_google]);
 in
   writeShellApplication {
     name = "infra";
@@ -40,7 +50,7 @@ in
       install -m 644 ${config} "$work/config.tf.json"
 
       init() {
-        if ! tofu -chdir="$work" init -input=false -no-color >"$work/init.log" 2>&1; then
+        if ! tofu -chdir="$work" init -input=false -no-color -plugin-dir=${pluginDir} >"$work/init.log" 2>&1; then
           cat "$work/init.log" >&2
           exit 1
         fi

@@ -54,6 +54,12 @@ Edit the modules here. A pull request gets `tofu plan` in the summary of its Inf
 the read-only `infra-plan` account; main applies it as `infra-apply`, in the `infra`
 environment. Locally, `nix run .#infra -- plan` (or any other `tofu` command) runs as you.
 
+OpenTofu gets its providers from the Nix store only, at the versions the nixpkgs in
+`flake.lock` has (`init -plugin-dir`, and an exact version constraint): `flake.lock` is the
+lock file, and the weekly update bumps it. Its Infra run plans the new providers on its
+branch, and main applies them after the merge. A provider that nixpkgs does not have fails
+`init` rather than being downloaded.
+
 `infra-apply` owns the project, but on the billing account it can only manage budgets: it
 cannot link billing, so no apply can undo the kill switch. For the same reason, changes to
 the billing account's IAM (`google_billing_account_iam_member`) must be applied locally, by

@@ -20,7 +20,8 @@ jobs:
 
       - uses: DeterminateSystems/determinate-nix-action@v3
 
-      # flake.lock (nixpkgs: Node, PostgreSQL, Chromium, the image's base), then npm
+      # flake.lock (nixpkgs: Node, PostgreSQL, Chromium, the image's base, OpenTofu and its
+      # Google provider; Terranix), then npm
       # packages within package.json's ranges. The Nix build reads package-lock.json
       # directly, so there is no hash to refresh after it.
       - name: Update flake.lock and package-lock.json
@@ -38,14 +39,19 @@ jobs:
           labels: dependencies
           body: |
             Weekly update of `flake.lock` (`nix flake update`) and `package-lock.json`
-            (`npm update`, within the ranges in `package.json`).
+            (`npm update`, within the ranges in `package.json`). `flake.lock` also pins
+            OpenTofu's providers for `infra/`: the Infra run on this branch plans the bump,
+            and main applies it after the merge.
 
             CI runs on this branch by dispatch, and merges the PR if it passes. Major npm
             upgrades need `package.json` edits and are left to a person.
 
-      # A PR opened with GITHUB_TOKEN triggers no pull_request run, so start CI by hand.
-      - name: Run CI on the branch
+      # A PR opened with GITHUB_TOKEN triggers no pull_request run, so start CI, and the
+      # plan of infra/ against the new providers, by hand.
+      - name: Run CI and the infra plan on the branch
         if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run ci.yml --ref automated/update-deps
+        run: |
+          gh workflow run ci.yml --ref automated/update-deps
+          gh workflow run infra.yml --ref automated/update-deps

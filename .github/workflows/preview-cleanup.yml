@@ -10,6 +10,10 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  # The demo's region, as in infra/settings.nix.
+  GCP_REGION: us-west1
+
 jobs:
   untag:
     if: github.event.pull_request.head.repo.full_name == github.repository && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
@@ -27,7 +31,7 @@ jobs:
           TAG: pr-${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          service=(finreports-demo --region us-central1 --quiet)
+          service=(finreports-demo --region "$GCP_REGION" --quiet)
           if gcloud run services describe "${service[@]}" --format=json |
             jq -e --arg tag "$TAG" '.status.traffic[] | select(.tag == $tag)' >/dev/null; then
             gcloud run services update-traffic "${service[@]}" --remove-tags "$TAG"

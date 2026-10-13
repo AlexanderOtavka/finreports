@@ -1,7 +1,8 @@
 name: Infra
 
-# OpenTofu on infra/: a plan on pull requests (read-only, in the job summary), an apply on
-# main (in the `infra` environment, which only main may use). infra/README.md has the setup.
+# OpenTofu on infra/: a plan on pull requests and on other branches by dispatch (read-only,
+# in the job summary; the weekly update dispatches it), an apply on main (in the `infra`
+# environment, which only main may use). infra/README.md has the setup.
 on:
   pull_request:
     paths: &paths
@@ -30,7 +31,10 @@ env:
 
 jobs:
   plan:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    if: >-
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

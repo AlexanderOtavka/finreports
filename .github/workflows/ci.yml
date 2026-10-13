@@ -15,8 +15,8 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/alexanderotavka/finreports
-  # Artifact Registry's pull-through cache of the same package (infra/demo.nix).
-  DEMO_IMAGE_NAME: us-central1-docker.pkg.dev/finreports-firefly/ghcr/alexanderotavka/finreports
+  # The demo's region, as in infra/settings.nix.
+  GCP_REGION: us-west1
 
 permissions:
   contents: read
@@ -108,6 +108,7 @@ jobs:
           set -euo pipefail
           test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "1000:1000"
           docker run -d --name demo -p 8081:8080 --read-only --tmpfs /tmp "$IMAGE"
+          trap 'docker logs demo; docker rm -f demo' EXIT
           for _ in $(seq 1 30); do
             curl -sf http://localhost:8081/reports/-/healthz && break
             sleep 1
@@ -119,8 +120,6 @@ jobs:
             sleep 1
           done
           curl -sf http://localhost:8081/reports/api/status | jq -e '.txns > 1000'
-          docker logs demo
-          docker rm -f demo
 
       - name: Log in to GHCR
         if: (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || env.PUBLISH_DEMO == 'true'
@@ -184,11 +183,12 @@ jobs:
       - name: Deploy
         id: deploy
         env:
-          IMAGE: ${{ env.DEMO_IMAGE_NAME }}@${{ needs.container.outputs.demo-digest }}
+          # Artifact Registry's pull-through cache of the GHCR package (infra/demo.nix).
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/finreports-firefly/ghcr/alexanderotavka/finreports@${{ needs.container.outputs.demo-digest }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          service=(finreports-demo --region us-central1 --quiet)
+          service=(finreports-demo --region "$GCP_REGION" --quiet)
           # Two deploys at once (two PRs) can conflict on the service; the loser retries.
           retry() { for i in 1 2 3 4; do "$@" && return; sleep $((i * 15)); done; "$@"; }
           if [ -n "$PR" ]; then
@@ -214,7 +214,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Merge the update PR, then build and publish main
+      - name: Merge the update PR, then build and publish main, and apply infra/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -233,3 +233,5 @@ jobs:
             xargs -r -n1 gh run delete
           gh pr merge "$pr" --squash --delete-branch
           gh workflow run ci.yml --ref main
+          # Applies infra/ with the providers flake.lock now pins (no push run either).
+          gh workflow run infra.yml --ref main
