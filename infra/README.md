@@ -7,23 +7,28 @@ billing account, and the `finreports-firefly` project itself (imported).
 
 | File | |
 |---|---|
-| `settings.nix` | Project, region, repository, state bucket. |
+| `settings.nix` | Project, region, repository, state bucket, demo service and image. Also read by `nix/infra.nix` and `nix/demo.nix`. |
 | `project.nix` | The project (imported), its APIs, the state bucket (imported). |
 | `ci.nix` | Workload Identity Federation for GitHub Actions, and its three service accounts. |
 | `demo.nix` | The `finreports-demo` Cloud Run service, and Artifact Registry's cache of GHCR. |
-| `killswitch.nix`, `killswitch.py` | The budget, and the service that unlinks billing on any charge. |
+| `killswitch.nix`, `killswitch.py` | The budget, and the service that unlinks billing on any charge (tested by `killswitch_test.py`). |
 
 ## How a demo gets there
 
 CI (`.github/workflows/ci.yml`) builds the demo image (`nix/demo-container.nix`: the service
 with `DEMO_MODE=true` and its own PostgreSQL in `/tmp`), pushes it to GHCR as
-`demo-sha-<commit>`, and deploys it to `finreports-demo` through Artifact Registry's cache:
+`demo-sha-<commit>`, and deploys it to `finreports-demo` through Artifact Registry's cache,
+with `nix run .#demo -- deploy <digest> [--pr <number>]` (`nix/demo.nix`):
 
 - **main**: a revision with the tag `main`, which then takes all of the service's traffic.
 - **a pull request** from this repository: a revision with the tag `pr-<number>` and no
   traffic, at `https://pr-<number>---finreports-demo-….run.app/reports/`. The PR shows it
   as a deployment to `demo-pr`, with a "View deployment" button. `preview-cleanup.yml`
-  removes the tag when the PR closes.
+  removes the tag when the PR closes (`nix run .#demo -- untag <number>`).
+
+`nix flake check` runs those commands against a stand-in `gcloud` and checks their calls
+(`nix/infra-checks.nix`), validates the rendered configuration offline against the pinned
+provider, and runs the kill switch's tests.
 
 Each revision runs at most one instance, which keeps its database in memory: a demo starts
 from the sample data whenever it wakes up, about 15 minutes after its last visit.

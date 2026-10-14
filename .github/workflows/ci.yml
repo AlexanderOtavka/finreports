@@ -15,8 +15,6 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/alexanderotavka/finreports
-  # The demo's region, as in infra/settings.nix.
-  GCP_REGION: us-west1
 
 permissions:
   contents: read
@@ -175,36 +173,27 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      # After the checkout, which would delete the credentials file this writes.
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: preview-deployer@finreports-firefly.iam.gserviceaccount.com
 
-      - uses: google-github-actions/setup-gcloud@v3
-
+      # nix/demo.nix: the gcloud calls, with the project and region from infra/settings.nix.
       - name: Deploy
         id: deploy
         env:
-          # Artifact Registry's pull-through cache of the GHCR package (infra/demo.nix).
-          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/finreports-firefly/ghcr/alexanderotavka/finreports@${{ needs.container.outputs.demo-digest }}
+          DIGEST: ${{ needs.container.outputs.demo-digest }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          service=(finreports-demo --region "$GCP_REGION" --quiet)
-          # Two deploys at once (two PRs) can conflict on the service; the loser retries.
-          retry() { for i in 1 2 3 4; do "$@" && return; sleep $((i * 15)); done; "$@"; }
-          if [ -n "$PR" ]; then
-            retry gcloud run deploy "${service[@]}" --image "$IMAGE" --tag "pr-${PR}" --no-traffic
-            url="$(gcloud run services describe "${service[@]}" --format=json |
-              jq -r --arg tag "pr-${PR}" '.status.traffic[] | select(.tag == $tag) | .url')"
-          else
-            # By the tag, not --to-latest: a PR may deploy a later revision meanwhile.
-            retry gcloud run deploy "${service[@]}" --image "$IMAGE" --tag main --no-traffic
-            retry gcloud run services update-traffic "${service[@]}" --to-tags main=100
-            url="$(gcloud run services describe "${service[@]}" --format='value(status.url)')"
-          fi
-          echo "url=${url}/reports/" >> "$GITHUB_OUTPUT"
-          echo "Demo: ${url}/reports/" >> "$GITHUB_STEP_SUMMARY"
+          url="$(nix run .#demo -- deploy "$DIGEST" ${PR:+--pr "$PR"})"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Demo: ${url}" >> "$GITHUB_STEP_SUMMARY"
 
   # Merges the weekly update once everything above passed on its branch.
   automerge:

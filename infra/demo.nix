@@ -2,10 +2,10 @@
 # with a tag and no traffic, at https://pr-<n>---finreports-demo-….run.app/reports/. CI
 # deploys both (.github/workflows/ci.yml, preview-cleanup.yml); this file sets up the rest.
 {settings, ...}: let
-  inherit (settings) project region;
+  inherit (settings) region demoService demoImage;
 in {
   # Cloud Run pulls from Artifact Registry, not from GHCR, so a remote repository fronts
-  # GHCR: ${region}-docker.pkg.dev/${project}/ghcr/alexanderotavka/finreports:<tag>.
+  # GHCR: ${demoImage}:<tag>.
   resource.google_artifact_registry_repository.ghcr = {
     location = region;
     repository_id = "ghcr";
@@ -37,7 +37,7 @@ in {
   };
 
   resource.google_cloud_run_v2_service.demo = {
-    name = "finreports-demo";
+    name = demoService;
     location = region;
     ingress = "INGRESS_TRAFFIC_ALL";
     deletion_protection = false;
@@ -111,6 +111,6 @@ in {
 
   output = {
     demo_url.value = "\${google_cloud_run_v2_service.demo.uri}/reports/";
-    demo_image_repository.value = "${region}-docker.pkg.dev/${project}/ghcr/alexanderotavka/finreports";
+    demo_image_repository.value = demoImage;
   };
 }

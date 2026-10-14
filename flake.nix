@@ -27,6 +27,7 @@
           inherit terranix;
           inherit (pkgs.stdenv.hostPlatform) system;
         };
+        demo = pkgs.callPackage ./nix/demo.nix {};
       }
       // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         container = pkgs.callPackage ./nix/container.nix {inherit finreports;};
@@ -39,15 +40,24 @@
         program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.infra;
         meta.description = "OpenTofu on infra/ (Terranix): bootstrap, plan, apply, …";
       };
+      demo = {
+        type = "app";
+        program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.demo;
+        meta.description = "Deploy a demo to Cloud Run, or untag a PR's (CI's)";
+      };
     });
 
     checks = forAllSystems (pkgs: let
       inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) finreports;
       checks = pkgs.callPackage ./nix/checks.nix {inherit finreports;};
+      infraChecks = pkgs.callPackage ./nix/infra-checks.nix {
+        inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) infra;
+      };
     in
       {
         inherit finreports;
         inherit (checks) tests;
+        inherit (infraChecks) demo infra-config killswitch;
       }
       // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         inherit (checks) smoke;

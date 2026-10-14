@@ -40,7 +40,7 @@
     ];
   };
 in
-  writeShellApplication {
+  (writeShellApplication {
     name = "infra";
     runtimeInputs = [tofu google-cloud-sdk gh coreutils git];
     text = ''
@@ -119,4 +119,8 @@ in
           ;;
       esac
     '';
-  }
+  })
+  .overrideAttrs (old: {
+    # For the checks (nix/infra-checks.nix).
+    passthru = (old.passthru or {}) // {inherit config tofu pluginDir;};
+  })
