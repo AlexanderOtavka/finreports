@@ -262,24 +262,6 @@ export function App() {
     return () => ro.disconnect();
   }, [fatal]);
 
-  // An on-screen keyboard (iOS) shrinks only the visual viewport: the page scrolls under it while
-  // the sticky headers stay at the top of the layout viewport, up behind the browser's bar. The
-  // visible part's offset into the layout viewport, as --vv-top, brings them down to where the
-  // eye is. Not while pinch-zoomed, where the headers stay with the page.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const root = document.documentElement.style;
-    const update = () => root.setProperty("--vv-top", `${vv.scale > 1.01 ? 0 : Math.max(0, Math.round(vv.offsetTop))}px`);
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-    };
-  }, []);
-
   // --- Rendering -------------------------------------------------------------------------
 
   if (fatal) {
