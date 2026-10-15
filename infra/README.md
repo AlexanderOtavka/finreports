@@ -23,7 +23,8 @@ with `nix run .#demo -- deploy <digest> [--pr <number>]` (`nix/demo.nix`):
 - **main**: a revision with the tag `main`, which then takes all of the service's traffic.
 - **a pull request** from this repository: a revision with the tag `pr-<number>` and no
   traffic, at `https://pr-<number>---finreports-demo-….run.app/reports/`. The PR shows it
-  as a deployment to `demo-pr`, with a "View deployment" button. `preview-cleanup.yml`
+  as a deployment to `demo-pr`, and in a comment that CI keeps up to date (GitHub marks a
+  PR's deployment inactive once another PR deploys). `preview-cleanup.yml`
   removes the tag when the PR closes (`nix run .#demo -- untag <number>`).
 
 `nix flake check` runs those commands against a stand-in `gcloud` and checks their calls

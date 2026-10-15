@@ -160,8 +160,9 @@ jobs:
       packages: write
 
   # Main's demo takes the service's traffic; a pull request's is a tagged revision with no
-  # traffic, at its own URL, shown on the PR as a deployment. preview-cleanup.yml removes the
-  # tag when the PR closes. Skipped until infra/ is bootstrapped (infra/README.md).
+  # traffic, at its own URL, in a comment on the PR (kept up to date: GitHub marks a PR's
+  # deployment inactive as soon as another PR deploys to demo-pr). preview-cleanup.yml
+  # removes the tag when the PR closes. Skipped until infra/ is bootstrapped (infra/README.md).
   demo:
     needs: container
     if: needs.container.outputs.demo-digest != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
@@ -172,6 +173,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
 
@@ -194,6 +196,20 @@ jobs:
           url="$(nix run .#demo -- deploy "$DIGEST" ${PR:+--pr "$PR"})"
           echo "url=${url}" >> "$GITHUB_OUTPUT"
           echo "Demo: ${url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Link the demo from the PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          .github/scripts/demo-comment.sh "$PR" "**Demo** of ${SHA:0:7}: ${URL}
+
+          The app on generated sample data, logged in as a demo user. What you change there is gone
+          when it goes idle. Removed when this pull request closes."
 
   # Merges the weekly update once everything above passed on its branch.
   automerge:
