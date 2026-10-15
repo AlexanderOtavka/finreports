@@ -46,6 +46,12 @@ jobs:
   container:
     needs: check
     runs-on: ubuntu-latest
+    outputs:
+      demo-digest: ${{ steps.demo.outputs.digest }}
+    env:
+      # Main, and pull requests from this repository: forks and Dependabot get a read-only
+      # token, so no image and no demo.
+      PUBLISH_DEMO: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
     services:
       postgres:
         image: postgres:17
@@ -63,10 +69,12 @@ jobs:
 
       - uses: DeterminateSystems/determinate-nix-action@v3
 
-      - name: Build and load the image
+      - name: Build and load the images
         run: |
           nix build .#container --out-link container.tar.gz
           docker load < container.tar.gz
+          nix build .#demo-container --out-link demo-container.tar.gz
+          docker load < demo-container.tar.gz
 
       - name: Check the image runs as uid 1000 with a read-only root
         env:
@@ -91,8 +99,28 @@ jobs:
           docker logs app
           docker rm -f app
 
+      - name: Check the demo image runs alone and lets anyone in
+        env:
+          IMAGE: finreports-demo:latest
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "1000:1000"
+          docker run -d --name demo -p 8081:8080 --read-only --tmpfs /tmp "$IMAGE"
+          trap 'docker logs demo; docker rm -f demo' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8081/reports/-/healthz && break
+            sleep 1
+          done
+          curl -sf -H 'Host: pr-1---finreports-demo-x.a.run.app' http://localhost:8081/reports/api/session |
+            jq -e '.email == "demo@example.com" and .demo == true'
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8081/reports/api/status | jq -e '.txns > 1000' && break
+            sleep 1
+          done
+          curl -sf http://localhost:8081/reports/api/status | jq -e '.txns > 1000'
+
       - name: Log in to GHCR
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || env.PUBLISH_DEMO == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -108,9 +136,80 @@ jobs:
             docker push "${IMAGE_NAME}:${tag}"
           done
           echo "Published \`${IMAGE_NAME}@$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_NAME}:sha-${GITHUB_SHA}" | cut -d@ -f2)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Into the same public package, as demo-* tags, which Cloud Run pulls through Artifact
+      # Registry: a new package would start out private.
+      - name: Publish the demo image as demo-sha-<commit> (and demo, on main)
+        id: demo
+        if: env.PUBLISH_DEMO == 'true'
+        run: |
+          set -euo pipefail
+          tags=("demo-sha-${GITHUB_SHA}")
+          if [ "$GITHUB_REF" = refs/heads/main ]; then tags+=(demo); fi
+          # Straight from the Nix-built archive (skopeo reads docker login's credentials),
+          # and the digest of exactly what was pushed.
+          for tag in "${tags[@]}"; do
+            nix run --inputs-from . nixpkgs#skopeo -- --insecure-policy copy --digestfile demo.digest \
+              docker-archive:demo-container.tar.gz "docker://${IMAGE_NAME}:${tag}"
+          done
+          digest="$(cat demo.digest)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Published \`${IMAGE_NAME}@${digest}\` (demo)" >> "$GITHUB_STEP_SUMMARY"
     permissions:
       contents: read
       packages: write
+
+  # Main's demo takes the service's traffic; a pull request's is a tagged revision with no
+  # traffic, at its own URL, in a comment on the PR (kept up to date: GitHub marks a PR's
+  # deployment inactive as soon as another PR deploys to demo-pr). preview-cleanup.yml
+  # removes the tag when the PR closes. Skipped until infra/ is bootstrapped (infra/README.md).
+  demo:
+    needs: container
+    if: needs.container.outputs.demo-digest != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'demo-pr' || 'demo' }}
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      # After the checkout, which would delete the credentials file this writes.
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: preview-deployer@finreports-firefly.iam.gserviceaccount.com
+
+      # nix/demo.nix: the gcloud calls, with the project and region from infra/settings.nix.
+      - name: Deploy
+        id: deploy
+        env:
+          DIGEST: ${{ needs.container.outputs.demo-digest }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          url="$(nix run .#demo -- deploy "$DIGEST" ${PR:+--pr "$PR"})"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Demo: ${url}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Link the demo from the PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          .github/scripts/demo-comment.sh "$PR" "**Demo** of ${SHA:0:7}: ${URL}
+
+          The app on generated sample data, logged in as a demo user. What you change there is gone
+          when it goes idle. Removed when this pull request closes."
 
   # Merges the weekly update once everything above passed on its branch.
   automerge:
@@ -122,7 +221,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Merge the update PR, then build and publish main
+      - name: Merge the update PR, then build and publish main, and apply infra/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -134,6 +233,20 @@ jobs:
             echo "No open update PR at ${GITHUB_SHA}; nothing to merge."
             exit 0
           fi
+          # Only with a good plan of infra/ against the new providers (update.yml starts it;
+          # its jobs are skipped until infra/ is bootstrapped).
+          infra="$(gh run list --workflow infra.yml --branch automated/update-deps --event workflow_dispatch \
+            --commit "$GITHUB_SHA" --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$infra" ]; then
+            echo "No Infra run at ${GITHUB_SHA}; not merging."
+            exit 1
+          fi
+          gh run watch "$infra" >/dev/null
+          conclusion="$(gh run view "$infra" --json conclusion --jq .conclusion)"
+          if [ "$conclusion" != success ] && [ "$conclusion" != skipped ]; then
+            echo "The Infra plan at ${GITHUB_SHA} ended in ${conclusion}; not merging."
+            exit 1
+          fi
           # The PR also gets a pull_request run that waits for approval, as it was opened by a
           # bot, and fails once the PR closes. This run stands in for it, so delete it.
           gh run list --branch automated/update-deps --event pull_request --commit "$GITHUB_SHA" \
@@ -141,3 +254,5 @@ jobs:
             xargs -r -n1 gh run delete
           gh pr merge "$pr" --squash --delete-branch
           gh workflow run ci.yml --ref main
+          # Applies infra/ with the providers flake.lock now pins (no push run either).
+          gh workflow run infra.yml --ref main

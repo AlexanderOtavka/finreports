@@ -88,6 +88,7 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
     email: req.user!.email,
     csrfToken: req.user!.csrfToken,
     devBypass: config.auth.devBypass,
+    demo: config.auth.demo,
     navLinks: config.navLinks,
   }));
 

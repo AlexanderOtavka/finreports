@@ -109,6 +109,7 @@ export interface SessionDto {
   email: string;
   csrfToken: string;
   devBypass: boolean;
+  demo: boolean;
   navLinks: NavLink[];
 }
 

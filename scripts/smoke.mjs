@@ -461,8 +461,9 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();
     await shot("dark");
-    await page.getByTestId("txn-search").fill("lucali");
-    assert((await searched()) > 0, "dark: search finds Lucali");
+    // A restaurant found in this range above: which ones the range has depends on the day.
+    await page.getByTestId("txn-search").fill(otherName.toLowerCase());
+    assert((await searched()) > 0, `dark: search finds ${otherName}`);
     await page.getByTestId("txn-search").evaluate((el) => el.closest("section").scrollIntoView({ block: "start" }));
     await shot("dark-search");
 

@@ -18,7 +18,8 @@ import type { Db } from "./db.js";
  *   allows only this origin.
  *
  * DEV_AUTH_BYPASS replaces all of it with a fixed local user; config.ts refuses it with the
- * Firefly backend or NODE_ENV=production.
+ * Firefly backend or NODE_ENV=production. DEMO_MODE does the same for the public demo, on any
+ * host and in production, and config.ts refuses it with any backend but the sample one.
  */
 
 declare module "fastify" {
@@ -167,23 +168,26 @@ function safeNext(next: unknown): string {
 }
 
 export const DEV_USER = "dev@localhost";
+export const DEMO_USER = "demo@example.com";
 
 export function registerAuth(app: FastifyInstance, config: Config, db: Db): void {
   const auth = config.auth;
   const sessions = new Sessions(db, auth.idleTimeoutMs, auth.absoluteTimeoutMs);
   const pending = new Map<string, PendingLogin>();
   const devCsrf = token();
+  const noLogin = auth.devBypass || auth.demo;
   const allowedHosts = new Set(auth.devBypass ? [...auth.allowedHosts, "localhost", "127.0.0.1"] : auth.allowedHosts);
 
   app.addHook("onRequest", async (req, reply) => {
     const path = req.url.split("?")[0]!;
     // Probes come by pod IP, so health is exempt from the host check.
     if (path === `${BASE}/-/healthz`) return;
-    if (!allowedHosts.has(req.hostname.toLowerCase())) {
+    // The demo answers on every preview's own hostname.
+    if (!auth.demo && !allowedHosts.has(req.hostname.toLowerCase())) {
       return reply.code(MISDIRECTED_REQUEST).type("text/plain").send("Misdirected request");
     }
-    if (auth.devBypass) {
-      req.user = { email: DEV_USER, csrfToken: devCsrf };
+    if (noLogin) {
+      req.user = { email: auth.demo ? DEMO_USER : DEV_USER, csrfToken: devCsrf };
     } else {
       const sid = parseCookies(req.headers.cookie)[auth.cookieName];
       const session = sid ? await sessions.get(sid) : null;
@@ -214,7 +218,7 @@ export function registerAuth(app: FastifyInstance, config: Config, db: Db): void
   });
 
   app.get(`${BASE}/auth/login`, async (req: FastifyRequest<{ Querystring: { next?: string } }>, reply: FastifyReply) => {
-    if (auth.devBypass) return reply.redirect(safeNext(req.query.next));
+    if (noLogin) return reply.redirect(safeNext(req.query.next));
     const now = Date.now();
     for (const [k, v] of pending) if (v.expires < now) pending.delete(k);
     if (pending.size > 1000) pending.clear();
@@ -239,7 +243,7 @@ export function registerAuth(app: FastifyInstance, config: Config, db: Db): void
   app.get(
     `${BASE}/auth/callback`,
     async (req: FastifyRequest<{ Querystring: { code?: string; state?: string } }>, reply: FastifyReply) => {
-      if (auth.devBypass) return reply.redirect(`${BASE}/`);
+      if (noLogin) return reply.redirect(`${BASE}/`);
       const fail = (reason: string) => {
         req.log.warn({ reason }, "login refused");
         return reply

@@ -30,8 +30,13 @@ async function main(): Promise<void> {
   if (config.auth.devBypass) {
     app.log.warn("DEV_AUTH_BYPASS is on: every request is logged in as a local dev user. Never use this in production.");
   }
+  if (config.auth.demo) {
+    app.log.warn("DEMO_MODE is on: anyone who reaches this service is logged in, over the sample data.");
+  }
   if (applied.length) app.log.info({ applied }, "migrations applied");
 
+  // Cloud Run gives the demo no CPU between requests: fill the mirror before taking any.
+  if (config.auth.demo) await sync.run();
   await app.listen({ port: config.port, host: config.host });
   if (config.sync.enabled) sync.start();
 

@@ -30,6 +30,8 @@ export interface Config {
   auth: {
     /** True only for local development and smoke tests. */
     devBypass: boolean;
+    /** The public demo: everyone is the demo user, on any host, over the sample data only. */
+    demo: boolean;
     /** This service's public origin: the OAuth redirect URI is built on it. */
     publicOrigin: string;
     /** Firefly as the browser reaches it: where the user authorizes. */
@@ -136,6 +138,14 @@ export function loadConfig(env: Env = process.env): Config {
     }
   }
 
+  const demo = env.DEMO_MODE === "true";
+  if (env.DEMO_MODE !== undefined && env.DEMO_MODE !== "" && !demo) {
+    throw new Error(`DEMO_MODE must be unset or "true", got ${env.DEMO_MODE}`);
+  }
+  if (demo && backend !== "sample") {
+    throw new Error("DEMO_MODE is for the sample backend only");
+  }
+
   const trim = (url: string) => url.replace(/\/+$/, "");
   const fireflyUrl = trim(env.FIREFLY_INTERNAL_URL || "http://firefly.firefly.svc.cluster.local");
   // Required for real logins (checked below); local development may leave it to default.
@@ -163,6 +173,7 @@ export function loadConfig(env: Env = process.env): Config {
     },
     auth: {
       devBypass,
+      demo,
       publicOrigin,
       fireflyPublicUrl: trim(env.FIREFLY_PUBLIC_URL || publicOrigin),
       fireflyInternalUrl: fireflyUrl,
@@ -187,7 +198,7 @@ export function loadConfig(env: Env = process.env): Config {
   if (backend === "firefly" && !config.firefly.token) {
     throw new Error("BACKEND=firefly needs FIREFLY_TOKEN or FIREFLY_TOKEN_FILE");
   }
-  if (!devBypass) {
+  if (!devBypass && !demo) {
     if (!config.auth.clientId || !config.auth.clientSecret) {
       throw new Error("Login needs OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET (or OAUTH_CLIENT_SECRET_FILE)");
     }

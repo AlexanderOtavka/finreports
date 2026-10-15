@@ -1,0 +1,61 @@
+name: Remove PR demo
+
+# A closed pull request's demo revision loses its tag, and with it its URL. The revision
+# itself stays, serving nothing and costing nothing, until Cloud Run prunes old revisions.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  id-token: write
+  deployments: write
+  pull-requests: write
+
+jobs:
+  untag:
+    if: github.event.pull_request.head.repo.full_name == github.repository && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      # The default branch: a closed PR's merge ref may be gone.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: preview-deployer@finreports-firefly.iam.gserviceaccount.com
+
+      # nix/demo.nix
+      - name: Remove the tag
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: nix run .#demo -- untag "$PR"
+
+      # Its deployments to demo-pr stop looking live. Made from the PR's merge ref, or named
+      # by its branch.
+      - name: Mark the PR's deployments inactive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GH_REPO}/deployments?environment=demo-pr" --paginate |
+            jq -r --arg merge "refs/pull/${PR}/merge" --arg branch "$BRANCH" \
+              '.[] | select(.ref == $merge or .ref == $branch) | .id' |
+            while read -r id; do
+              gh api --silent -X POST "repos/${GH_REPO}/deployments/${id}/statuses" -f state=inactive
+            done
+
+      - name: Say so on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          .github/scripts/demo-comment.sh "$PR" "**Demo** removed: this pull request is closed."
