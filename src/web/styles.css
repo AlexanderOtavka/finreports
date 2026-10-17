@@ -151,9 +151,6 @@ a {
   margin: 0;
   flex: none;
   display: flex;
-  /* Its darker blue goes up under the status bar too, in an installed app. */
-  margin-top: calc(-1 * env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
   background: var(--logo);
   font-size: 1.25rem;
   font-weight: 300;
@@ -161,7 +158,6 @@ a {
 .brand a {
   display: flex;
   align-items: center;
-  flex: 1;
   padding: 0 15px;
   color: var(--navbar-ink);
   white-space: nowrap;
