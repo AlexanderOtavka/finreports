@@ -48,7 +48,7 @@ const MISDIRECTED_REQUEST = 421;
 
 /** Reachable without a login. Static assets carry no data. */
 const PUBLIC_PREFIXES = [`${BASE}/-/`, `${BASE}/auth/`, `${BASE}/assets/`, `${BASE}/icons/`];
-const PUBLIC_EXACT = new Set([`${BASE}/manifest.webmanifest`, `${BASE}/favicon.svg`]);
+const PUBLIC_EXACT = new Set([`${BASE}/manifest.webmanifest`, `${BASE}/favicon.svg`, `${BASE}/sw.js`]);
 
 export interface FireflyUser {
   id: string | null;

@@ -70,3 +70,10 @@ export function presetRange(preset: RangePreset, end = today()): { from: string;
 }
 
 export const isPreset = (v: string | null): v is RangePreset => v !== null && Object.hasOwn(RANGE_LABELS, v);
+
+/** When the data was fetched: the time today, else the date and time ("Oct 14, 2:05 PM"). */
+export function formatSyncTime(ms: number): string {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${time}`;
+}

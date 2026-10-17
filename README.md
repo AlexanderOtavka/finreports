@@ -98,6 +98,19 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   gzipped) and runs the reports itself, so a new report, range, set of accounts or drill path
   recomputes the chart and the list from scratch, with no request. Installable as a PWA. It borrows Firefly III's look
   (AdminLTE's blue navbar and boxes) so it sits comfortably next to it.
+- **Offline**: a service worker (`src/sw/sw.ts`, built to `/reports/sw.js` with the list of
+  the build's files) serves the app's files from a cache, and the page keeps the last data the
+  server sent in IndexedDB (`src/web/store.ts`). So the app opens at once from that copy, and
+  opens with no network at all, then refreshes from the server in the background, again when
+  the network comes back, and when it comes back to the front five minutes or more later. While
+  the copy on screen is not the server's latest, the top bar says so: "Updating…", "Offline"
+  or "Not updated" with the time of the copy (tap to try again); once the session is over, the
+  copy stays on screen and the button at the end of the bar turns into "Log in", with an
+  orange dot. Recategorizing needs the server. When a new build has been downloaded (the app
+  looks for one on every launch and whenever it comes back to the front), a banner offers to
+  reload into it; otherwise the next launch opens it. The copy stays on the device
+  when a session times out; the "Log out" button at the end of the top bar ends the session
+  and removes it (offline, it removes the copy, and the session ends on its own once idle).
 
 ## Categories, rules and provenance
 
@@ -193,7 +206,7 @@ e.g. a mounted Kubernetes Secret).
 `DEV_AUTH_BYPASS=i-understand-this-disables-login` logs every request in as `dev@localhost`
 and accepts `localhost` as a host. It exists for local development and the smoke tests, and
 the service refuses to start with it when `BACKEND=firefly`, when `NODE_ENV=production` (the
-image sets that), or when it has any other value. The UI shows a "dev" badge while it is on.
+image sets that), or when it has any other value. The UI shows a "dev" ribbon in the top-left corner while it is on.
 
 ## Login and security
 
@@ -232,18 +245,23 @@ nix develop -c npm run smoke
 ```
 
 Builds, starts a throwaway PostgreSQL and the real server (`BACKEND=sample`, dev bypass),
-and drives Chromium (playwright-core) at a phone (390×844) and a desktop (1280×900)
-viewport: load on the last 30 days → 90 days → Custom (the URL switches from `range=` to
-dates) → 1 year → search the transactions (`trader`, then `trader <month>`, then a word only
+and drives Chromium (playwright-core) at a phone (390×844), a desktop (1280×900) and an
+installed-app (393×852) viewport: load on the last 30 days → 90 days → Custom (the URL switches from `range=` to
+dates) → 1 year → reload offline (the same chart, from the service worker and the kept copy)
+and back online → a new build (the banner, and reload into it) → a session that is over
+(the same chart, and "Log in") → search the transactions (`trader`, then `trader <month>`, then a word only
 in the notes) → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
 Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categorize" → preview count
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the
 exported `decision_event` rows and their snapshot → the monthly report → a month → a
 merchant → its transaction's website, location and "Look up" → tap the merchant's name: the
 list searches for it, with the drill path and range kept, then a year of it → dark mode → only some accounts
-(kept through tabs, ranges, links and the back button). Any console
+(kept through tabs, ranges, links and the back button) → log out (the copy on the device
+is gone) and back in. Any console
 error, page error, failed request, or HTTP error fails it. Screenshots of every step land in
-`smoke-output/<viewport>/` (gitignored): look at them. `SMOKE_VIEWPORTS=phone` limits the run;
+`smoke-output/<viewport>/` (gitignored): look at them. Besides `phone` and `desktop`, the
+`installed` run is an iPhone 15 with the app added to the Home Screen: the whole screen, with
+the status bar's and home indicator's safe areas. `SMOKE_VIEWPORTS=phone` limits the run;
 `CHROMIUM_PATH` picks the browser. `nix flake check` runs it too, in the build sandbox, and CI
 uploads its screenshots as the `smoke-screenshots` artifact.
 

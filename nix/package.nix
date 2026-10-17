@@ -12,6 +12,7 @@
       ../package-lock.json
       ../tsconfig.json
       ../tsconfig.server.json
+      ../tsconfig.sw.json
       ../vite.config.ts
       ../vitest.config.ts
       ../migrations
