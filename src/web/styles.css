@@ -150,7 +150,8 @@ a {
 .navbar {
   display: flex;
   align-items: stretch;
-  min-height: 50px;
+  /* 50px under the status bar of an installed app (border-box: the padding counts). */
+  min-height: calc(50px + env(safe-area-inset-top));
   background: var(--navbar);
   color: var(--navbar-ink);
   padding-top: env(safe-area-inset-top);
@@ -159,6 +160,9 @@ a {
   margin: 0;
   flex: none;
   display: flex;
+  /* Its darker blue goes up under the status bar too, in an installed app. */
+  margin-top: calc(-1 * env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
   background: var(--logo);
   font-size: 1.25rem;
   font-weight: 300;
@@ -166,6 +170,7 @@ a {
 .brand a {
   display: flex;
   align-items: center;
+  flex: 1;
   padding: 0 15px;
   color: var(--navbar-ink);
   white-space: nowrap;
@@ -173,17 +178,56 @@ a {
 .brand b {
   font-weight: 700;
 }
-.dev-badge {
-  align-self: center;
-  margin-left: 0.6rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+/* DEV_AUTH_BYPASS: a ribbon across the top-left corner (under the status bar of an installed
+   app), over everything and in the way of nothing: the bar lays out as it will in production. */
+.dev-ribbon {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  left: 0;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 40;
+}
+.dev-ribbon span {
+  position: absolute;
+  top: 3px;
+  left: -21px;
+  width: 56px;
+  transform: rotate(-45deg);
   background: var(--warning);
   color: #fff;
-  border-radius: 0.25em;
-  padding: 0.15em 0.5em;
+  font-size: 7px;
   font-weight: 700;
+  line-height: 11px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+}
+/* The data on screen is a copy kept on this device: updating, or offline. */
+.sync-status {
+  flex: none;
+  align-self: center;
+  margin-left: 0.6rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  color: var(--navbar-ink);
+  opacity: 0.85;
+}
+.sync-status button {
+  font: inherit;
+  color: inherit;
+  background: rgb(0 0 0 / 15%);
+  border: 0;
+  border-radius: 0.25em;
+  padding: 0.25em 0.55em;
+  cursor: pointer;
+}
+.sync-status.offline,
+.sync-status.error {
+  opacity: 1;
 }
 .nav-links {
   display: flex;
@@ -207,9 +251,72 @@ a {
 .nav-links a:focus-visible {
   background: rgb(0 0 0 / 10%);
 }
+/* Last in the navbar, right after the links to other apps (or pushed right without them): log
+   out, or, once the session is over, log in, with an orange dot to say it is wanted. */
+.account-button {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-left: auto;
+  padding: 0 14px;
+  background: none;
+  border: 0;
+  color: var(--navbar-ink);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.nav-links + .account-button {
+  margin-left: 0;
+}
+.account-button:hover,
+.account-button:focus-visible {
+  background: rgb(0 0 0 / 10%);
+}
+.account-icon {
+  position: relative;
+  display: flex;
+}
+.account-dot {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--navbar);
+}
+.login .account-text {
+  font-weight: 700;
+}
+.card.logged-out {
+  max-width: 28rem;
+  margin: 2rem max(0.75rem, calc((100% - 28rem) / 2)) 0;
+  padding: 1.5rem;
+}
+.logged-out h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.4rem;
+  font-weight: 400;
+}
+.logged-out .btn-primary {
+  margin-top: 0.5rem;
+}
 @media (max-width: 480px) {
   .brand {
     font-size: 1.1rem;
+  }
+  .account-button {
+    padding: 0 12px;
+  }
+  /* "Log out" is an icon here; "Log in", which is wanted, keeps its words while they fit. */
+  .account-button:not(.login) .account-text {
+    display: none;
+  }
+  .sync-time {
+    display: none;
   }
   .brand a {
     padding: 0 12px;
@@ -226,12 +333,17 @@ a {
   .brand a {
     padding: 0 10px;
   }
-  .dev-badge {
+  .sync-status {
     margin-left: 0.4rem;
   }
   .nav-links a {
     padding: 0 8px;
     font-size: 0.85rem;
+  }
+}
+@media (max-width: 340px) {
+  .login .account-text {
+    display: none;
   }
 }
 .nav-links a[target="_blank"]::after {
@@ -1208,6 +1320,53 @@ a {
 }
 
 /* --- Toast: Bootstrap alerts ------------------------------------------------------------- */
+
+/* A newer build is cached: reload into it, or later. Above the toast's place. */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 25%);
+  font-size: 0.93rem;
+  z-index: 29;
+  animation: rise 0.2s ease-out;
+}
+.update-reload {
+  flex: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 1px solid var(--accent-dark);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+.update-dismiss {
+  flex: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--text-3);
+  background: none;
+  border: 0;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+.update-banner:has(~ .toast) {
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
 
 .toast {
   position: fixed;

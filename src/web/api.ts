@@ -3,13 +3,13 @@ import type {
   CategoryDto,
   RecategorizeRequest,
   RecategorizeResponse,
-  ReportData,
   RulePreview,
   SessionDto,
   SuggestionsDto,
   TxnDto,
 } from "../shared/api.js";
 import type { RuleDefinition } from "../shared/rules.js";
+import type { Snapshot } from "./store.js";
 
 const BASE = "/reports/api";
 let csrfToken: string | null = null;
@@ -23,20 +23,41 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+/** Logs in again and comes back here. */
+export function login(): void {
+  window.location.assign(`/reports/auth/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+}
+
+/** No network: the request never reached the server. */
+export const isOffline = (err: unknown): boolean => err instanceof ApiError && err.status === 0;
+
+interface RequestOptions {
+  body?: unknown;
+  signal?: AbortSignal;
+  /** On a 401, log in again (the default), or only throw. */
+  loginOn401?: boolean;
+}
+
+async function request<T>(method: string, path: string, { body, signal, loginOn401 = true }: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: "same-origin",
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: "same-origin",
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    throw new ApiError("you're offline", 0);
+  }
   if (res.status === 401) {
-    // Session over: log in again and come back here.
-    window.location.assign(`/reports/auth/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    // Session over.
+    if (loginOn401) login();
     throw new ApiError("login required", 401);
   }
   if (!res.ok) {
@@ -61,19 +82,29 @@ export interface ReportQuery {
 }
 
 export const api = {
-  async session(): Promise<SessionDto> {
-    const s = await request<SessionDto>("GET", "/session");
-    csrfToken = s.csrfToken;
-    return s;
+  /**
+   * Everything the app draws from, fresh. A 401 only throws: the app may still have data to
+   * show, and it decides whether to log in.
+   */
+  async snapshot(): Promise<{ session: SessionDto } & Omit<Snapshot, "session" | "fetchedAt">> {
+    const get = <T>(path: string) => request<T>("GET", path, { loginOn401: false });
+    const [session, categories, categoryOrder, accounts, txns] = await Promise.all([
+      get<SessionDto>("/session"),
+      get<CategoryDto[]>("/categories"),
+      get<string[]>("/category-order"),
+      get<AccountDto[]>("/accounts"),
+      get<TxnDto[]>("/transactions"),
+    ]);
+    csrfToken = session.csrfToken;
+    return { session, categories, categoryOrder, accounts, txns };
   },
-  categories: () => request<CategoryDto[]>("GET", "/categories"),
-  categoryOrder: () => request<string[]>("GET", "/category-order"),
-  accounts: () => request<AccountDto[]>("GET", "/accounts"),
   /** Every transaction; the reports run over them in the browser. */
   transactions: () => request<TxnDto[]>("GET", "/transactions"),
   suggestions: (txnId: number) => request<SuggestionsDto>("GET", `/transactions/${txnId}/suggestions`),
   previewRule: (definition: RuleDefinition, excludeTxnId: number, signal?: AbortSignal) =>
-    request<RulePreview>("POST", "/rules/preview", { definition, excludeTxnId }, signal),
+    request<RulePreview>("POST", "/rules/preview", { body: { definition, excludeTxnId }, signal }),
   recategorize: (txnId: number, body: RecategorizeRequest) =>
-    request<RecategorizeResponse>("POST", `/transactions/${txnId}/category`, body),
+    request<RecategorizeResponse>("POST", `/transactions/${txnId}/category`, { body }),
+  /** Ends the session on the server; a 401 means it already had. */
+  logout: () => request<{ ok: boolean }>("POST", "/logout", { loginOn401: false }),
 };

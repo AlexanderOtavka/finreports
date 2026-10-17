@@ -13,7 +13,7 @@
  * CHROMIUM_PATH overrides the browser; SMOKE_VIEWPORTS=phone limits the run.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -23,10 +23,18 @@ import { chromium } from "playwright-core";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "smoke-output");
 const BYPASS = "i-understand-this-disables-login";
+// The built service worker: each run changes it to look like a new build, and it is put back.
+const swPath = join(root, "dist/web/sw.js");
+let swSource = null;
 
 const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   desktop: { viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 },
+  // Added to the Home Screen of an iPhone 15: the whole screen, under the status bar and above
+  // the home indicator (the safe area).
+  installed: { viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, safeArea: { top: 59, bottom: 34 } },
+  // An 11-inch iPad Air in portrait, the app added to the Home Screen.
+  ipad: { viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, safeArea: { top: 24, bottom: 20 } },
 };
 
 function which(cmd) {
@@ -173,7 +181,7 @@ async function tapSlice(page, base, reportId, ctx, key, touch) {
   else await page.mouse.click(x, y);
 }
 
-async function runFlow(name, options, chromiumPath, pg) {
+async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
   const shots = join(outDir, name);
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
@@ -182,20 +190,31 @@ async function runFlow(name, options, chromiumPath, pg) {
   const server = await startServer(pg.url(dbName));
   const browser = await chromium.launch({ executablePath: chromiumPath, args: ["--no-sandbox"] });
   const problems = [];
+  // While the context is offline on purpose, failing to reach the server is expected.
+  let offline = false;
+  // Likewise the 401s while the session is made to look over, and the 503s while the server is.
+  let signedOut = false;
+  let serverDown = false;
+  const disconnected = (text) =>
+    (offline && /ERR_INTERNET_DISCONNECTED/.test(text)) ||
+    (signedOut && /status of 401 \(Unauthorized\)/.test(text)) ||
+    (serverDown && /status of 503 \(Service Unavailable\)/.test(text));
   let lastShot = "none yet";
   try {
     const context = await browser.newContext({ ...options, colorScheme: "light", locale: "en-US", timezoneId: "America/New_York" });
     const page = await context.newPage();
+    if (safeArea) await (await context.newCDPSession(page)).send("Emulation.setSafeAreaInsetsOverride", { insets: safeArea });
     page.on("console", (msg) => {
-      if (msg.type() === "error") problems.push(`console error: ${msg.text()}`);
+      if (msg.type() === "error" && !disconnected(msg.text())) problems.push(`console error: ${msg.text()}`);
     });
     page.on("pageerror", (err) => problems.push(`page error: ${err.message}`));
     page.on("requestfailed", (req) => {
       // Superseded fetches are aborted on purpose when the view changes.
-      if (req.failure()?.errorText !== "net::ERR_ABORTED") problems.push(`request failed: ${req.url()} ${req.failure()?.errorText}`);
+      const error = req.failure()?.errorText ?? "";
+      if (error !== "net::ERR_ABORTED" && !disconnected(error)) problems.push(`request failed: ${req.url()} ${error}`);
     });
     page.on("response", (res) => {
-      if (res.status() >= 400) problems.push(`HTTP ${res.status()}: ${res.url()}`);
+      if (res.status() >= 400 && !(signedOut && res.status() === 401) && !(serverDown && res.status() === 503)) problems.push(`HTTP ${res.status()}: ${res.url()}`);
     });
     let step = 0;
     const shot = async (label, { fullPage = false } = {}) => {
@@ -252,6 +271,81 @@ async function runFlow(name, options, chromiumPath, pg) {
     assert((await range()).from.endsWith("-01"), "12 months start on the 1st");
     await page.getByTestId("ranked-row").first().waitFor();
     await shot("load");
+
+    // 1a. Offline: the service worker has the app's files, and the page a copy of the data, so
+    //     a reload with no network draws the same chart at once and says it is offline. Back
+    //     online, it updates and says nothing.
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    await page.waitForFunction(
+      () =>
+        new Promise((resolve) => {
+          const open = indexedDB.open("finreports", 1);
+          open.onupgradeneeded = () => open.result.createObjectStore("snapshot");
+          open.onerror = () => resolve(false);
+          open.onsuccess = () => {
+            const get = open.result.transaction("snapshot").objectStore("snapshot").get("data");
+            get.onsuccess = () => resolve(Boolean(get.result));
+            get.onerror = () => resolve(false);
+          };
+        }),
+    );
+    const onlineRows = await page.getByTestId("ranked-row").allInnerTexts();
+    offline = true;
+    await context.setOffline(true);
+    await page.reload();
+    await page.getByTestId("ranked-row").first().waitFor();
+    await page.locator("[data-testid=sync-status][data-state=offline]").waitFor();
+    assert(JSON.stringify(await page.getByTestId("ranked-row").allInnerTexts()) === JSON.stringify(onlineRows), "offline: the same chart");
+    assert((await page.getByTestId("txn").count()) > 0, "offline: the transactions are listed");
+    await shot("offline");
+    await context.setOffline(false);
+    offline = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.getByTestId("sync-status").waitFor({ state: "detached" });
+    // A new build: the app opened from the cache finds it, and offers to reload into it.
+    writeFileSync(swPath, `${swSource}\n// smoke: a new build for ${name}\n`);
+    await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
+    await page.getByTestId("update-banner").waitFor();
+    await shot("update-ready");
+    await page.getByTestId("update-reload").click();
+    await page.getByTestId("ranked-row").first().waitFor();
+    assert((await page.getByTestId("update-banner").count()) === 0, "the reloaded app is the new build");
+    // A slow server: the copy is on screen at once, "Updating…" until the server's arrives.
+    await page.route("**/reports/api/transactions", async (route) => {
+      await new Promise((r) => setTimeout(r, 2000));
+      await route.continue();
+    });
+    await page.reload();
+    await page.locator("[data-testid=sync-status][data-state=updating]").waitFor();
+    assert(JSON.stringify(await page.getByTestId("ranked-row").allInnerTexts()) === JSON.stringify(onlineRows), "updating: the kept chart");
+    await shot("updating");
+    await page.getByTestId("sync-status").waitFor({ state: "detached" });
+    await page.unrouteAll({ behavior: "wait" });
+    // A server that fails: the copy stays, and "Not updated" tries again.
+    serverDown = true;
+    await page.route("**/reports/api/transactions", (route) => route.fulfill({ status: 503, json: { error: "unavailable" } }));
+    await page.reload();
+    await page.locator("[data-testid=sync-status][data-state=error]").waitFor();
+    await shot("not-updated");
+    await page.unrouteAll();
+    serverDown = false;
+    await page.getByTestId("sync-status").getByRole("button").click();
+    await page.getByTestId("sync-status").waitFor({ state: "detached" });
+    // A session that is over keeps the copy on screen, with a "Log in" button, rather than
+    // leaving for the login page.
+    signedOut = true;
+    await page.route("**/reports/api/**", (route) => route.fulfill({ status: 401, json: { error: "login required" } }));
+    await page.reload();
+    await page.getByTestId("login").waitFor();
+    assert((await page.getByTestId("sync-status").count()) === 0, "signed out: the Log in button says it, not a status");
+    assert(JSON.stringify(await page.getByTestId("ranked-row").allInnerTexts()) === JSON.stringify(onlineRows), "signed out: the same chart");
+    await shot("signed-out");
+    await page.unrouteAll();
+    signedOut = false;
+    await page.reload();
+    await page.getByTestId("ranked-row").first().waitFor();
+    await page.getByTestId("logout").waitFor();
+    await page.getByTestId("sync-status").waitFor({ state: "detached" });
 
     // 1b. Search the transactions: the icon opens a search bar; every word has to match some
     //     field (merchant, date, category, amount, description, notes, tags…), and the matches
@@ -507,6 +601,26 @@ async function runFlow(name, options, chromiumPath, pg) {
     await page.getByTestId("ranked-row").first().waitFor();
     assert(accountsParam() === null && (await page.getByTestId("accounts-toggle").innerText()).includes("All accounts"), "a fresh load without the filter shows all accounts");
 
+    // 13. Log out: the session ends, and the copy of the data on this device is gone.
+    await page.getByTestId("logout").click();
+    await page.getByTestId("logged-out").waitFor();
+    const keptAfter = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const open = indexedDB.open("finreports", 1);
+          open.onsuccess = () => {
+            const get = open.result.transaction("snapshot").objectStore("snapshot").get("data");
+            get.onsuccess = () => resolve(get.result !== undefined);
+          };
+        }),
+    );
+    assert(!keptAfter, "logging out removes the data from the device");
+    assert((await page.getByTestId("logged-out").innerText()).includes("no longer kept"), "logged out says the data is gone");
+    await shot("logged-out");
+    // The dev bypass logs straight back in.
+    await page.getByTestId("login-again").click();
+    await page.getByTestId("ranked-row").first().waitFor();
+
     await context.close();
   } catch (err) {
     // CI keeps no screenshots of a failed run: say where it stopped.
@@ -526,12 +640,14 @@ async function main() {
   if (!existsSync(join(root, "dist/server/server/main.js")) || !existsSync(join(root, "dist/web/index.html"))) {
     throw new Error("no build: run `npm run build` first");
   }
-  const which_ = (process.env.SMOKE_VIEWPORTS ?? "phone,desktop").split(",").map((s) => s.trim()).filter(Boolean);
+  swSource = readFileSync(swPath, "utf8");
+  const which_ = (process.env.SMOKE_VIEWPORTS ?? "phone,desktop,installed").split(",").map((s) => s.trim()).filter(Boolean);
   const pg = await startPostgres();
   try {
     for (const name of which_) await runFlow(name, VIEWPORTS[name], chromiumPath, pg);
   } finally {
     pg.stop();
+    writeFileSync(swPath, swSource);
   }
 }
 

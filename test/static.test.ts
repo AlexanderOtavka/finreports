@@ -17,6 +17,7 @@ describe("web app", async () => {
   const build = (hash: string) => {
     writeFileSync(index, `<script type="module" src="/reports/assets/index-${hash}.js"></script>`);
     writeFileSync(join(webRoot, "assets", `index-${hash}.js`), "");
+    writeFileSync(join(webRoot, "sw.js"), `const BUILD = { version: "${hash}" };`);
     utimesSync(index, 1, 1);
   };
   build("AAAAAAAA");
@@ -49,6 +50,13 @@ describe("web app", async () => {
     });
     expect(again.statusCode).toBe(200);
     expect(again.body).toContain("index-BBBBBBBB.js");
+  });
+
+  it("serves the service worker from the scope's root, revalidated so every build replaces it", async () => {
+    const res = await get("/reports/sw.js");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/javascript/);
+    expect(res.headers["cache-control"]).toBe("no-cache");
   });
 
   it("lets browsers keep fingerprinted assets", async () => {

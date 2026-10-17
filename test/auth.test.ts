@@ -72,6 +72,9 @@ describe("OAuth login", async () => {
     expect(page.headers.location).toBe("/reports/auth/login?next=%2Freports%2F");
     expect((await req("/reports/api/session")).statusCode).toBe(401);
     expect((await req("/reports/-/healthz")).statusCode).toBe(200);
+    // The service worker carries no data, and has to update while logged out (no web app
+    // is built here, so it is a 404 rather than the login redirect).
+    expect((await req("/reports/sw.js")).statusCode).toBe(404);
   });
 
   it("authorizes at the public URL with PKCE", async () => {
