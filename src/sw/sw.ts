@@ -20,8 +20,10 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
-      // index.html is cached under the URL navigations ask for.
-      await cache.addAll([SCOPE, ...BUILD.files.filter((f) => f !== "index.html").map((f) => SCOPE + f)]);
+      // index.html is cached under the URL navigations ask for. A redirect fails the install
+      // (the old worker stays): Safari will not open a page from a redirected response.
+      const urls = [SCOPE, ...BUILD.files.filter((f) => f !== "index.html").map((f) => SCOPE + f)];
+      await cache.addAll(urls.map((u) => new Request(u, { redirect: "error" })));
       await self.skipWaiting();
     })(),
   );
@@ -52,5 +54,6 @@ self.addEventListener("fetch", (event) => {
 
 async function fromCache(key: string, req: Request): Promise<Response> {
   const cache = await caches.open(CACHE);
-  return (await cache.match(key)) ?? fetch(req);
+  const hit = await cache.match(key);
+  return hit && !hit.redirected ? hit : fetch(req);
 }
