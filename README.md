@@ -216,6 +216,11 @@ sessions are server-side (only a hash of the cookie is stored) with idle and abs
 timeouts, CSRF tokens live in the session and travel in an `X-CSRF-Token` header, requests
 for other hosts get 421, and the CSP allows only this origin.
 
+When the session is over (idle or absolute timeout), the app first logs in again in the
+background: while Firefly's own session is alive and the client is approved, the OAuth login
+is only redirects, so a `fetch` follows them to a new session and the request is retried. Only
+when Firefly would ask for something (its login or approval page) does the app show "Log in".
+
 ## Development
 
 `nix develop` gives Node 22, PostgreSQL 17 and (on Linux) Chromium.

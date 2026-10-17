@@ -346,6 +346,23 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await page.getByTestId("ranked-row").first().waitFor();
     await page.getByTestId("logout").waitFor();
     await page.getByTestId("sync-status").waitFor({ state: "detached" });
+    // A session that is over while Firefly's is not: the app logs in again in the background
+    // (with the dev bypass, the login is one redirect) and stays as it is, no "Log in".
+    signedOut = true;
+    let renewed = false;
+    await page.route("**/reports/auth/login*", (route) => {
+      renewed = true;
+      return route.continue();
+    });
+    await page.route("**/reports/api/**", (route) => (renewed ? route.continue() : route.fulfill({ status: 401, json: { error: "login required" } })));
+    await page.reload();
+    await page.getByTestId("ranked-row").first().waitFor();
+    await page.getByTestId("sync-status").waitFor({ state: "detached" });
+    assert(renewed, "renewed: the app logged in again in the background");
+    assert((await page.getByTestId("login").count()) === 0, "renewed: no Log in button");
+    assert(JSON.stringify(await page.getByTestId("ranked-row").allInnerTexts()) === JSON.stringify(onlineRows), "renewed: the same chart");
+    await page.unrouteAll();
+    signedOut = false;
 
     // 1b. Search the transactions: the icon opens a search bar; every word has to match some
     //     field (merchant, date, category, amount, description, notes, tags…), and the matches
