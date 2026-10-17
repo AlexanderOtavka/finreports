@@ -67,14 +67,17 @@ describe("OAuth login", async () => {
   }
 
   it("sends anonymous page loads to login and API calls a 401", async () => {
-    const page = await req("/reports/");
+    const page = await req("/reports/settings");
     expect(page.statusCode).toBe(302);
-    expect(page.headers.location).toBe("/reports/auth/login?next=%2Freports%2F");
+    expect(page.headers.location).toBe("/reports/auth/login?next=%2Freports%2Fsettings");
     expect((await req("/reports/api/session")).statusCode).toBe(401);
     expect((await req("/reports/-/healthz")).statusCode).toBe(200);
     // The service worker carries no data, and has to update while logged out (no web app
     // is built here, so it is a 404 rather than the login redirect).
     expect((await req("/reports/sw.js")).statusCode).toBe(404);
+    // Nor does the shell, which the worker caches whatever the session.
+    expect((await req("/reports/")).statusCode).toBe(404);
+    expect((await req("/reports/index.html")).statusCode).toBe(404);
   });
 
   it("authorizes at the public URL with PKCE", async () => {

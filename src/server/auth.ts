@@ -46,9 +46,19 @@ const BASE = "/reports";
 const OAUTH_COOKIE = "REPORTSOAUTH";
 const MISDIRECTED_REQUEST = 421;
 
-/** Reachable without a login. Static assets carry no data. */
+/**
+ * Reachable without a login. Static assets carry no data, nor does the app's shell (index.html):
+ * the service worker caches it whether or not the session is alive, and the app itself asks for
+ * a login when the API answers 401.
+ */
 const PUBLIC_PREFIXES = [`${BASE}/-/`, `${BASE}/auth/`, `${BASE}/assets/`, `${BASE}/icons/`];
-const PUBLIC_EXACT = new Set([`${BASE}/manifest.webmanifest`, `${BASE}/favicon.svg`, `${BASE}/sw.js`]);
+const PUBLIC_EXACT = new Set([
+  `${BASE}/`,
+  `${BASE}/index.html`,
+  `${BASE}/manifest.webmanifest`,
+  `${BASE}/favicon.svg`,
+  `${BASE}/sw.js`,
+]);
 
 export interface FireflyUser {
   id: string | null;
