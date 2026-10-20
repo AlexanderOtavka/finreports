@@ -120,10 +120,10 @@ export function chartTheme(dark: boolean, categoryOrder: string[]): ChartTheme {
   return {
     dark,
     // Firefly III's (AdminLTE's) text and box colors; see styles.css.
-    text: dark ? "#e8ecee" : "#333333",
-    textMuted: dark ? "#b8c7ce" : "#777777",
-    surface: dark ? "#2c3b41" : "#ffffff",
-    grid: dark ? "#415761" : "#f4f4f4",
+    text: dark ? "#bfc4ca" : "#333333",
+    textMuted: dark ? "#868c92" : "#777777",
+    surface: dark ? "#282c30" : "#ffffff",
+    grid: dark ? "#363c41" : "#f4f4f4",
     other: foldColor(dark),
     neutral: dark ? "#8f8e88" : "#86857f",
     colorFor: (index) => (index < FOLD_AT ? (dark ? DARK : LIGHT)[index]! : foldColor(dark)),
