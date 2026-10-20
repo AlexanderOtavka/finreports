@@ -13,6 +13,7 @@ export interface TxnRow {
   currency: string;
   type: "withdrawal" | "deposit" | "transfer";
   pending: boolean;
+  /** The merchant shown and matched on: the backend's, or one a rule filled in. */
   merchant: string | null;
   merchant_key: string;
   description: string;
@@ -36,6 +37,11 @@ export interface TxnRow {
   first_seen_at: Date;
   synced_at: Date;
   deleted_at: Date | null;
+  /** The merchant as the backend last reported it; null when it has none. */
+  backend_merchant: string | null;
+  /** `backend` or `rule:<id>`. */
+  merchant_provenance: string;
+  merchant_dirty: boolean;
 }
 
 export function toDto(row: TxnRow): TxnDto {
@@ -72,6 +78,19 @@ export function toSubject(row: TxnRow): RuleSubject {
   return { merchant: row.merchant, description: row.description, accountName: row.account_name, amount: row.amount };
 }
 
+/** The transaction as the backend has it, before any rule filled in its merchant. */
+export function backendSubject(row: TxnRow): RuleSubject {
+  return { ...toSubject(row), merchant: row.backend_merchant };
+}
+
+/**
+ * Whether a rule may set this transaction's merchant: the backend has none (or has only the
+ * one a rule here wrote to it), and it is not a transfer, which has no merchant.
+ */
+export function merchantFillable(row: TxnRow): boolean {
+  return row.type !== "transfer" && (row.backend_merchant === null || row.merchant_provenance.startsWith("rule:"));
+}
+
 /**
  * Everything about a transaction a model would need to learn the decision, as it stood
  * when the decision was made. Stored in `decision_event.txn_snapshot`.
@@ -87,6 +106,8 @@ export function snapshot(row: TxnRow): Record<string, unknown> {
     type: row.type,
     pending: row.pending,
     merchant: row.merchant,
+    backendMerchant: row.backend_merchant,
+    merchantProvenance: row.merchant_provenance,
     merchantDisplay: merchantDisplay(row.merchant, row.description),
     merchantKey: row.merchant_key,
     description: row.description,

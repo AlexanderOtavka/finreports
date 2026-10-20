@@ -164,12 +164,12 @@ describe("API (sample backend, dev auth bypass)", async () => {
 
   it("limits reports to the chosen accounts", async () => {
     const accounts = await get<AccountDto[]>("/reports/api/accounts");
-    expect(accounts.map((a) => a.id).sort()).toEqual(["chk", "jordan", "sam", "sav"]);
+    expect(accounts.map((a) => a.id).sort()).toEqual(["cap1", "chk", "jordan", "sam", "sav"]);
     expect(accounts.find((a) => a.id === "jordan")!.name).toBe("Jordan Rewards Visa ••3308");
 
     const all = await run("spending-by-category");
     const jordan = await run("spending-by-category", { accounts: ["jordan"] });
-    const rest = await run("spending-by-category", { accounts: ["chk", "sam", "sav"] });
+    const rest = await run("spending-by-category", { accounts: ["cap1", "chk", "sam", "sav"] });
     expect(jordan.total).toBeGreaterThan(0);
     expect(jordan.total).toBeLessThan(all.total);
     expect(jordan.total + rest.total).toBeCloseTo(all.total, 2);

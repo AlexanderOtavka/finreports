@@ -5,7 +5,8 @@
  * viewport. It walks the whole flow (load → search the transactions → tap a slice →
  * subcategories and filtered list → tap a subcategory → open a transaction → recategorize →
  * "always" rule → preview → apply → chart and list update → decision log export → a merchant's
- * transactions from the sheet) and fails on any console error, page error,
+ * transactions from the sheet → the rules builder: a group, its proposed rule, saved) and fails
+ * on any console error, page error,
  * failed request, or HTTP error. Screenshots of every step go to smoke-output/<viewport>/.
  *
  * Needs: a build (`npm run build`), initdb/pg_ctl and chromium on PATH, e.g.
@@ -613,10 +614,53 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await page.goBack();
     await page.waitForFunction(() => new URL(location.href).searchParams.get("r") === "monthly-trend");
     assert(accountsParam() === "jordan,sam", "the back button keeps the accounts");
-    assert((await page.getByTestId("accounts-toggle").innerText()).includes("2 of 4"), "the filter counts the accounts");
+    assert((await page.getByTestId("accounts-toggle").innerText()).includes("2 of 5"), "the filter counts the accounts");
     await page.goto(`${server.base}/reports/?r=spending-by-category&range=12m`);
     await page.getByTestId("ranked-row").first().waitFor();
     assert(accountsParam() === null && (await page.getByTestId("accounts-toggle").innerText()).includes("All accounts"), "a fresh load without the filter shows all accounts");
+
+    // 12b. The rules builder: what is missing a merchant or a category, grouped by description.
+    //      The old card's Trader Joe's statements match Plaid's Trader Joe's; its rule fills in
+    //      the merchant and the category, and the group is gone. In light mode again.
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.getByTestId("report-rules-builder").click();
+    await page.getByTestId("builder-summary").waitFor();
+    await page.getByTestId("builder-group").first().waitFor();
+    assert(urlParams().r === "rules-builder" && !urlParams().range, `the builder is in the URL (${page.url()})`);
+    const deficientBefore = Number((await page.getByTestId("builder-deficient").innerText()).replace(/,/g, ""));
+    assert(deficientBefore > 500, `the builder counts what is missing (${deficientBefore})`);
+    assert((await page.locator(".range-bar").count()) === 0, "no range bar in the builder");
+    await shot("builder");
+    const tj = page.locator('[data-testid=builder-group][data-key="trader joes"]');
+    await tj.scrollIntoViewIfNeeded();
+    assert((await tj.getByTestId("builder-match").innerText()).includes("Trader Joe's"), "the group matches Trader Joe's");
+    await tj.click();
+    await page.getByTestId("proposal-sheet").waitFor();
+    assert((await page.getByTestId("candidate").first().getAttribute("aria-checked")) === "true", "the best match is picked");
+    assert((await page.getByTestId("proposal-merchant").inputValue()) === "Trader Joe's", "the merchant is copied from it");
+    await page.getByTestId("proposal-count").waitFor();
+    const proposalCount = Number(await page.getByTestId("proposal-count").innerText());
+    assert(proposalCount > 5, `the rule would change the group (${proposalCount})`);
+    await shot("builder-proposal");
+    await page.getByTestId("proposal-save").click();
+    await page.getByTestId("proposal-sheet").waitFor({ state: "detached" });
+    await page.getByTestId("toast").waitFor();
+    const builderToast = await page.getByTestId("toast").innerText();
+    assert(builderToast.includes(`${proposalCount} transactions updated`), `the toast says what the rule did (${builderToast})`);
+    await page.waitForFunction(() => !document.querySelector('[data-testid=builder-group][data-key="trader joes"]'));
+    const deficientAfter = Number((await page.getByTestId("builder-deficient").innerText()).replace(/,/g, ""));
+    assert(deficientAfter === deficientBefore - proposalCount, `the count drops by the group (${deficientBefore} → ${deficientAfter})`);
+    await shot("builder-after");
+    // A group with nothing to copy from: name it yourself.
+    await page.locator('[data-testid=builder-group][data-key="key food"]').click();
+    await page.getByTestId("proposal-sheet").waitFor();
+    assert((await page.getByTestId("candidate-own").getAttribute("aria-checked")) === "true", "no match: name it yourself");
+    await shot("builder-no-match");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("proposal-sheet").waitFor({ state: "detached" });
+    // Back to the reports.
+    await page.getByTestId("report-spending-by-category").click();
+    await page.getByTestId("ranked-row").first().waitFor();
 
     // 13. Log out: the session ends, and the copy of the data on this device is gone.
     await page.getByTestId("logout").click();

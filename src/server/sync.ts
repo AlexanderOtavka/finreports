@@ -30,8 +30,11 @@ interface SyncState {
   lastError: string | null;
 }
 
-/** Columns the backend owns; a change to any of them sends the row back through the rules. */
-const RULE_INPUTS = ["merchant", "description", "account_name", "amount"] as const;
+/**
+ * Columns the backend owns; a change to any of them (or to the backend's merchant) sends the
+ * row back through the rules.
+ */
+const RULE_INPUTS = ["description", "account_name", "amount"] as const;
 
 /**
  * Keeps `txn` in step with the backend: pull changes through the adapter, upsert them, run
@@ -162,8 +165,6 @@ export class SyncService {
       currency: b.currency,
       type: b.type,
       pending: b.pending,
-      merchant: b.merchant,
-      merchant_key: merchantKey(b.merchant, b.description),
       description: b.description,
       account_id: b.accountId,
       account_name: b.accountName,
@@ -195,8 +196,8 @@ export class SyncService {
         `INSERT INTO txn (backend, external_id, group_id, date, amount, currency, type, pending, merchant,
            merchant_key, description, account_id, account_name, counterparty, plaid_primary, plaid_detailed,
            backend_updated_at, backend_category, category_id, category_provenance, category_set_at,
-           backend_dirty, needs_rules, website, latitude, longitude, notes, tags)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),$21,$22,$23,$24,$25,$26,$27)
+           backend_dirty, needs_rules, website, latitude, longitude, notes, tags, backend_merchant)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),$21,$22,$23,$24,$25,$26,$27,$9)
          RETURNING *`,
         [
           this.adapter.name,
@@ -207,8 +208,8 @@ export class SyncService {
           fields.currency,
           fields.type,
           fields.pending,
-          fields.merchant,
-          fields.merchant_key,
+          b.merchant,
+          merchantKey(b.merchant, b.description),
           fields.description,
           fields.account_id,
           fields.account_name,
@@ -244,15 +245,26 @@ export class SyncService {
     });
     // The backend's category moved and it was not us: someone or something there chose it.
     const backendRecategorized = !row.backend_dirty && b.category !== row.backend_category;
-    if (changed.length === 0 && !backendRecategorized && !row.deleted_at) return "unchanged";
+    // Likewise its merchant. One filled in here stays while its write is on the way, and once
+    // the backend has it, the backend's and ours are the same.
+    const backendRenamed = !row.merchant_dirty && b.merchant !== row.backend_merchant;
+    const merchant = backendRenamed ? b.merchant : row.merchant;
+    const merchantChanged = b.merchant !== row.backend_merchant || merchant !== row.merchant;
+    if (changed.length === 0 && !backendRecategorized && !merchantChanged && !row.deleted_at) return "unchanged";
 
-    const needsRules = row.needs_rules || backendRecategorized || changed.some((k) => (RULE_INPUTS as readonly string[]).includes(k));
+    const needsRules =
+      row.needs_rules ||
+      backendRecategorized ||
+      merchantChanged ||
+      changed.some((k) => (RULE_INPUTS as readonly string[]).includes(k));
     await client.query(
       `UPDATE txn SET group_id=$2, date=$3, amount=$4, currency=$5, type=$6, pending=$7, merchant=$8,
          merchant_key=$9, description=$10, account_id=$11, account_name=$12, counterparty=$13,
          plaid_primary=$14, plaid_detailed=$15, backend_updated_at=$16, synced_at=now(), deleted_at=NULL,
-         needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22
-         ${backendRecategorized ? ", backend_category=$23, category_id=$24, category_provenance=$25, category_set_at=now()" : ""}
+         needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22, backend_merchant=$23,
+         merchant_provenance=CASE WHEN $24 THEN 'backend' ELSE merchant_provenance END,
+         merchant_dirty=(merchant_dirty AND $23::text IS DISTINCT FROM $8::text)
+         ${backendRecategorized ? ", backend_category=$25, category_id=$26, category_provenance=$27, category_set_at=now()" : ""}
        WHERE id=$1`,
       [
         row.id,
@@ -262,8 +274,8 @@ export class SyncService {
         fields.currency,
         fields.type,
         fields.pending,
-        fields.merchant,
-        fields.merchant_key,
+        merchant,
+        merchantKey(merchant, b.description),
         fields.description,
         fields.account_id,
         fields.account_name,
@@ -277,6 +289,8 @@ export class SyncService {
         fields.longitude,
         fields.notes,
         fields.tags,
+        b.merchant,
+        backendRenamed,
         ...(backendRecategorized ? [b.category, fromBackend.categoryId, fromBackend.provenance] : []),
       ],
     );
@@ -284,8 +298,8 @@ export class SyncService {
   }
 
   /**
-   * Writes locally decided categories to the backend. A failure leaves the row dirty for
-   * the next round; a row changed again while its write was in flight stays dirty too.
+   * Writes locally decided merchants and categories to the backend. A failure leaves the row
+   * dirty for the next round; a row changed again while its write was in flight stays dirty too.
    */
   pushDirty(): Promise<{ pushed: number; failed: number }> {
     if (!this.pushing) {
@@ -299,6 +313,25 @@ export class SyncService {
   private async pushOnce(): Promise<{ pushed: number; failed: number }> {
     let pushed = 0;
     let failed = 0;
+    const merchants = await this.db.query<{ id: number; external_id: string; merchant: string }>(
+      `SELECT id, external_id, merchant FROM txn
+       WHERE merchant_dirty AND backend = $1 AND deleted_at IS NULL AND merchant IS NOT NULL
+       ORDER BY id LIMIT 1000`,
+      [this.adapter.name],
+    );
+    for (const row of merchants.rows) {
+      try {
+        await this.adapter.setMerchant(row.external_id, row.merchant);
+        await this.db.query("UPDATE txn SET merchant_dirty = false, backend_merchant = $2 WHERE id = $1 AND merchant = $2", [
+          row.id,
+          row.merchant,
+        ]);
+        pushed += 1;
+      } catch (err) {
+        failed += 1;
+        this.log.warn({ txn: row.id, err: (err as Error).message }, "merchant write-through failed; will retry");
+      }
+    }
     const res = await this.db.query<{ id: number; external_id: string; category_id: string; name: string }>(
       `SELECT t.id, t.external_id, t.category_id, c.name
        FROM txn t JOIN category c ON c.id = t.category_id

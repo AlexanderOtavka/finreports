@@ -13,6 +13,9 @@ export interface DecisionEvent {
   oldProvenance?: string | null;
   newCategoryId?: string | null;
   newProvenance?: string | null;
+  /** Set when the merchant changed (or, for a rule, when the rule sets one). */
+  oldMerchant?: string | null;
+  newMerchant?: string | null;
   ruleId?: number | null;
   ruleVersion?: number | null;
   ruleDefinition?: unknown;
@@ -24,8 +27,8 @@ export async function appendDecision(db: Queryable, e: DecisionEvent): Promise<n
   const res = await db.query<{ id: number }>(
     `INSERT INTO decision_event
        (actor, action, txn_id, txn_snapshot, old_category_id, old_provenance, new_category_id,
-        new_provenance, rule_id, rule_version, rule_definition, ui_context)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        new_provenance, rule_id, rule_version, rule_definition, ui_context, old_merchant, new_merchant)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING id`,
     [
       e.actor,
@@ -40,6 +43,8 @@ export async function appendDecision(db: Queryable, e: DecisionEvent): Promise<n
       e.ruleVersion ?? null,
       e.ruleDefinition === undefined ? null : JSON.stringify(e.ruleDefinition),
       JSON.stringify(e.uiContext ?? {}),
+      e.oldMerchant ?? null,
+      e.newMerchant ?? null,
     ],
   );
   return res.rows[0]!.id;
@@ -56,6 +61,8 @@ interface EventRow {
   old_provenance: string | null;
   new_category_id: string | null;
   new_provenance: string | null;
+  old_merchant: string | null;
+  new_merchant: string | null;
   rule_id: number | null;
   rule_version: number | null;
   rule_definition: unknown;
@@ -75,6 +82,8 @@ export function eventToJson(r: EventRow): Record<string, unknown> {
     oldProvenance: r.old_provenance,
     newCategoryId: r.new_category_id,
     newProvenance: r.new_provenance,
+    oldMerchant: r.old_merchant,
+    newMerchant: r.new_merchant,
     ruleId: r.rule_id,
     ruleVersion: r.rule_version,
     rule: r.rule_definition,

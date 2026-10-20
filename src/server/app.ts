@@ -7,10 +7,11 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 import { z } from "zod";
 import { REPORTS } from "../reports/index.js";
-import type { AccountDto, SessionDto } from "../shared/api.js";
+import type { AccountDto, RulePreviewCounts, SessionDto } from "../shared/api.js";
 import { recategorize, suggestions } from "./actions.js";
 import type { BackendAdapter } from "./adapters/types.js";
 import { registerAuth } from "./auth.js";
+import { rulesBuilder } from "./builder.js";
 import { CategoryIndex, createCategory, listCategories } from "./categories.js";
 import type { Config } from "./config.js";
 import { appRoot, inTransaction, type Db } from "./db.js";
@@ -171,9 +172,17 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
   app.post(`${BASE}/api/rules/preview`, async (req) => {
     const body = parse(previewBody, req.body);
     const definition = parseDefinition(body.definition, await CategoryIndex.load(db));
-    const rows = await backfillCandidates(db, definition, { excludeTxnId: body.excludeTxnId });
-    return { count: rows.length, sample: rows.slice(0, 5).map(toDto) };
+    const candidates = await backfillCandidates(db, definition, { excludeTxnId: body.excludeTxnId });
+    return {
+      count: candidates.length,
+      merchantCount: candidates.filter((c) => c.merchant !== null).length,
+      categoryCount: candidates.filter((c) => c.categoryId !== null).length,
+      sample: candidates.slice(0, 5).map((c) => toDto(c.row)),
+    } satisfies RulePreviewCounts;
   });
+
+  // Transactions missing a merchant or a category, grouped, with the merchants to copy from.
+  app.get(`${BASE}/api/rules-builder`, async () => rulesBuilder(db));
 
   app.post(`${BASE}/api/rules`, async (req, reply) => {
     const body = parse(ruleBody, req.body);

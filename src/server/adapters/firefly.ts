@@ -15,6 +15,10 @@ import type { BackendAccount, BackendAdapter, BackendTxn, ChangeSet } from "./ty
  * - Writing a category is `PUT /api/v1/transactions/{group}` with every split of the group
  *   (Firefly drops splits left out of an update) and `apply_rules: false`, so Firefly's own
  *   rules do not fight this service's.
+ * - The merchant is the opposing account: the destination of a withdrawal, the source of a
+ *   deposit. Writing it is the same PUT with that account's name; Firefly finds the expense or
+ *   revenue account of that name, or creates it. A Data Importer CSV import leaves it as
+ *   "(no name)", which reads as no merchant (`NO_PAYEE`).
  */
 export interface FireflyOptions {
   baseUrl: string;
@@ -173,18 +177,31 @@ export class FireflyAdapter implements BackendAdapter {
   }
 
   async setCategory(externalId: string, categoryName: string): Promise<void> {
+    await this.updateSplit(externalId, () => ({ category_name: categoryName }));
+  }
+
+  async setMerchant(externalId: string, merchant: string): Promise<void> {
+    await this.updateSplit(externalId, (split): Record<string, string> => {
+      if (split.type === "withdrawal") return { destination_name: merchant };
+      if (split.type === "deposit") return { source_name: merchant };
+      throw new FireflyError(`journal ${externalId} is a ${split.type}, which has no merchant`, 422);
+    });
+  }
+
+  /** Changes one split of its group: the PUT names every split, and changes only this one. */
+  private async updateSplit(externalId: string, change: (split: FireflySplit) => Record<string, string>): Promise<void> {
     const res = await this.request<{ data: FireflyGroup }>("GET", `/api/v1/transaction-journals/${encodeURIComponent(externalId)}`);
     const group = res.data;
     const splits = group.attributes.transactions;
-    if (!splits.some((s) => String(s.transaction_journal_id) === externalId)) {
-      throw new FireflyError(`journal ${externalId} is not in group ${group.id}`, 404);
-    }
+    const split = splits.find((s) => String(s.transaction_journal_id) === externalId);
+    if (!split) throw new FireflyError(`journal ${externalId} is not in group ${group.id}`, 404);
+    const fields = change(split);
     await this.request("PUT", `/api/v1/transactions/${encodeURIComponent(group.id)}`, {
       apply_rules: false,
       fire_webhooks: true,
       transactions: splits.map((s) =>
-        String(s.transaction_journal_id) === externalId
-          ? { transaction_journal_id: String(s.transaction_journal_id), category_name: categoryName }
+        s === split
+          ? { transaction_journal_id: String(s.transaction_journal_id), ...fields }
           : { transaction_journal_id: String(s.transaction_journal_id) },
       ),
     });

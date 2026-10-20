@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { recategorize } from "../src/server/actions.js";
 import { SampleAdapter } from "../src/server/adapters/sample.js";
 import type { BackendAdapter, BackendTxn, ChangeSet } from "../src/server/adapters/types.js";
+import { CategoryIndex } from "../src/server/categories.js";
+import { inTransaction } from "../src/server/db.js";
+import { saveRule } from "../src/server/rules.js";
 import { SyncService } from "../src/server/sync.js";
+import { descriptionKeyRule } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
 const END = "2026-09-30";
@@ -17,7 +21,7 @@ describe("sync with the sample backend", async () => {
     const expected = adapter.dataset().length;
     expect(stats).toMatchObject({ full: true, received: expected, inserted: expected, pushFailed: 0 });
     const res = await db.query<{ category_id: string; category_provenance: string; backend_category: string }>(
-      "SELECT category_id, category_provenance, backend_category FROM txn WHERE description LIKE 'SQ *SUDS%' LIMIT 1",
+      "SELECT category_id, category_provenance, backend_category FROM txn WHERE description LIKE 'SQ *SUDS%' AND account_id <> 'cap1' LIMIT 1",
     );
     expect(res.rows[0]).toEqual({
       category_id: "general-merchandise.other-general-merchandise",
@@ -32,7 +36,7 @@ describe("sync with the sample backend", async () => {
   });
 
   it("writes a manual category through and keeps it on the next sync", async () => {
-    const row = (await db.query<{ id: number; external_id: string }>("SELECT id, external_id FROM txn WHERE description LIKE 'SQ *SUDS%' ORDER BY id LIMIT 1")).rows[0]!;
+    const row = (await db.query<{ id: number; external_id: string }>("SELECT id, external_id FROM txn WHERE description LIKE 'SQ *SUDS%' AND account_id <> 'cap1' ORDER BY id LIMIT 1")).rows[0]!;
     await recategorize(db, row.id, { categoryId: "personal-care.laundry-and-dry-cleaning" }, "owner@example.com");
     expect((await sync.pushDirty()).pushed).toBe(1);
     const write = await db.query("SELECT category_name FROM sample_backend_write WHERE external_id = $1", [row.external_id]);
@@ -80,6 +84,11 @@ class ScriptedAdapter implements BackendAdapter {
   async setCategory(id: string, name: string) {
     if (this.failWrites) throw new Error("backend down");
     this.writes.push([id, name]);
+  }
+  merchantWrites: Array<[string, string]> = [];
+  async setMerchant(id: string, merchant: string) {
+    if (this.failWrites) throw new Error("backend down");
+    this.merchantWrites.push([id, merchant]);
   }
 }
 
@@ -170,5 +179,60 @@ describe("sync edge cases", async () => {
     expect(stats.deleted).toBe(1); // k1
     const k1 = await db.query("SELECT deleted_at IS NOT NULL AS deleted FROM txn WHERE external_id = 'k1'");
     expect(k1.rows[0]).toEqual({ deleted: true });
+  });
+});
+
+describe("merchants filled in by a rule", async () => {
+  const db = await freshDb();
+  const adapter = new ScriptedAdapter();
+  const sync = new SyncService(db, adapter, silentLog, { intervalMs: 1000, fullIntervalMs: 86_400_000 });
+  // A CSV import: the raw description, no payee, no category, nothing from Plaid.
+  const csv = (overrides: Partial<BackendTxn> = {}) =>
+    txn({ externalId: "c1", pending: false, merchant: null, counterparty: "(no name)", description: "TRADER JOE'S #558", plaid: null, category: null, categoryFromPlaid: false, ...overrides });
+  const row = async () =>
+    (await db.query("SELECT merchant, backend_merchant, merchant_provenance, merchant_dirty, category_id, backend_dirty FROM txn WHERE external_id = 'c1'")).rows[0];
+
+  it("writes the merchant and the category through, and keeps them once the backend has them", async () => {
+    adapter.next = { txns: [csv()], removed: [], cursor: "m0", completeFrom: null };
+    await sync.run();
+    expect(await row()).toMatchObject({ merchant: null, backend_merchant: null, merchant_provenance: "backend", category_id: null });
+
+    const saved = await inTransaction(db, async (c) =>
+      saveRule(c, {
+        definition: descriptionKeyRule("trader joes", { merchant: "Trader Joe's", categoryId: "food-and-drink.groceries" }),
+        applyToPast: true,
+        actor: "owner@example.com",
+        categories: await CategoryIndex.load(c),
+      }),
+    );
+    expect(saved.backfilled).toBe(1);
+
+    // The backend still says no merchant while the write is on the way: ours stays.
+    expect(await sync.run()).toMatchObject({ updated: 0, pushed: 2 });
+    expect(adapter.merchantWrites).toEqual([["c1", "Trader Joe's"]]);
+    expect(adapter.writes).toContainEqual(["c1", "Groceries"]);
+    expect(await row()).toMatchObject({ merchant: "Trader Joe's", backend_merchant: "Trader Joe's", merchant_provenance: `rule:${saved.id}`, merchant_dirty: false, backend_dirty: false });
+
+    // Now the backend has them both (and the payee is no longer "(no name)"): nothing to decide
+    // or write again.
+    adapter.next = { txns: [csv({ merchant: "Trader Joe's", counterparty: "Trader Joe's", category: "Groceries" })], removed: [], cursor: "m1", completeFrom: null };
+    expect(await sync.run()).toMatchObject({ updated: 1, ruleChanges: 0, pushed: 0 });
+    expect(await row()).toMatchObject({ merchant: "Trader Joe's", merchant_provenance: `rule:${saved.id}`, merchant_dirty: false });
+  });
+
+  it("keeps a failed merchant write dirty and retries it", async () => {
+    adapter.next = { txns: [csv({ externalId: "c2", description: "TRADER JOE'S #561" })], removed: [], cursor: "m2", completeFrom: null };
+    adapter.failWrites = true;
+    const stats = await sync.run();
+    expect(stats).toMatchObject({ inserted: 1, ruleChanges: 1, pushed: 0, pushFailed: 2 });
+    adapter.failWrites = false;
+    expect(await sync.pushDirty()).toEqual({ pushed: 2, failed: 0 });
+    expect(adapter.merchantWrites).toContainEqual(["c2", "Trader Joe's"]);
+  });
+
+  it("takes a merchant renamed in the backend as the backend's", async () => {
+    adapter.next = { txns: [csv({ merchant: "TJ's", counterparty: "TJ's", category: "Groceries" })], removed: [], cursor: "m3", completeFrom: null };
+    expect(await sync.run()).toMatchObject({ updated: 1, pushed: 0 });
+    expect(await row()).toMatchObject({ merchant: "TJ's", backend_merchant: "TJ's", merchant_provenance: "backend", merchant_dirty: false });
   });
 });

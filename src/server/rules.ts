@@ -1,17 +1,23 @@
 import { isDeepStrictEqual } from "node:util";
 import type { RuleDto, UiContext } from "../shared/api.js";
-import { evaluate, ruleDefinitionSchema, type RuleDefinition } from "../shared/rules.js";
+import { merchantKey } from "../shared/merchant.js";
+import { evaluate, ruleActions, ruleDefinitionSchema, type RuleDefinition } from "../shared/rules.js";
 import type { CategoryIndex } from "./categories.js";
 import type { Queryable } from "./db.js";
 import { appendDecision } from "./decisions.js";
 import { HttpError } from "./errors.js";
-import { snapshot, toSubject, type TxnRow } from "./txns.js";
+import { backendSubject, merchantFillable, snapshot, toSubject, type TxnRow } from "./txns.js";
 
 /**
  * The rules engine. Rules are versioned data (`rule` + `rule_version`); the newest active
  * rule that matches a transaction wins. Rules never touch a `manual` category. After a sync
  * they also leave `backend` categories alone (someone chose those in the backend); an
  * explicit backfill, which a person asks for, does not.
+ *
+ * Merchants first, then categories: the newest matching rule that sets a merchant fills in a
+ * missing one, and then the newest matching rule that sets a category (looking at the merchant
+ * just filled in) sets it. So a rule from the rules builder names an imported transaction, and
+ * a later "always categorize <that merchant>" rule reaches it too.
  */
 export interface ActiveRule {
   id: number;
@@ -49,33 +55,78 @@ export async function listRules(db: Queryable): Promise<RuleDto[]> {
   }));
 }
 
-export function firstMatch(rules: ActiveRule[], row: TxnRow): ActiveRule | undefined {
-  const subject = toSubject(row);
-  return rules.find((r) => evaluate(r.definition.when, subject));
+/**
+ * Whether `rule` matches `row`. A rule that sets the merchant looks at the transaction as the
+ * backend has it, so that filling in the merchant never changes what the rule matches, and
+ * leaves transfers alone.
+ */
+export function matches(rule: { definition: RuleDefinition }, row: TxnRow): boolean {
+  if (ruleActions(rule.definition).merchant === null) return evaluate(rule.definition.when, toSubject(row));
+  // A rule naming a merchant is about purchases and refunds; a transfer has no merchant.
+  return row.type !== "transfer" && evaluate(rule.definition.when, backendSubject(row));
+}
+
+/** The newest rule that sets a merchant and matches, if the merchant is one a rule may set. */
+export function merchantMatch(rules: ActiveRule[], row: TxnRow): ActiveRule | undefined {
+  if (!merchantFillable(row)) return undefined;
+  return rules.find((r) => ruleActions(r.definition).merchant !== null && matches(r, row));
+}
+
+/** The newest rule that sets a known category and matches. */
+export function categoryMatch(rules: ActiveRule[], row: TxnRow, categories: CategoryIndex): ActiveRule | undefined {
+  return rules.find((r) => {
+    const target = ruleActions(r.definition).categoryId;
+    return target !== null && categories.has(target) && matches(r, row);
+  });
 }
 
 export function parseDefinition(raw: unknown, categories: CategoryIndex): RuleDefinition {
   const parsed = ruleDefinitionSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(400, `invalid rule: ${parsed.error.issues[0]?.message ?? "bad definition"}`);
-  if (!categories.has(parsed.data.then.categoryId)) throw new HttpError(400, "rule targets an unknown category");
+  const { categoryId } = ruleActions(parsed.data);
+  if (categoryId !== null && !categories.has(categoryId)) throw new HttpError(400, "rule targets an unknown category");
   return parsed.data;
 }
 
-/** Transactions a backfill of `definition` would change: matching, not manual, not already there. */
+/** A transaction a backfill would change, and what about it. */
+export interface BackfillCandidate {
+  row: TxnRow;
+  /** The merchant it would get, when that is a change. */
+  merchant: string | null;
+  /** The category it would get, when that is a change. */
+  categoryId: string | null;
+}
+
+/**
+ * Transactions a backfill of `definition` would change: matching, and either missing the
+ * merchant it sets (a merchant the backend has is never replaced) or not yet in the category it
+ * sets (never one set by hand).
+ */
 export async function backfillCandidates(
   db: Queryable,
   definition: RuleDefinition,
   options: { excludeTxnId?: number; forUpdate?: boolean } = {},
-): Promise<TxnRow[]> {
+): Promise<BackfillCandidate[]> {
+  const actions = ruleActions(definition);
   const res = await db.query<TxnRow>(
     `SELECT * FROM txn
-     WHERE deleted_at IS NULL AND category_provenance <> 'manual'
-       AND category_id IS DISTINCT FROM $1 AND id <> $2
+     WHERE deleted_at IS NULL AND id <> $1
+       AND ((category_provenance <> 'manual' AND category_id IS DISTINCT FROM $2) OR $3::text IS NOT NULL)
      ORDER BY date DESC, id DESC
      ${options.forUpdate ? "FOR UPDATE" : ""}`,
-    [definition.then.categoryId, options.excludeTxnId ?? -1],
+    [options.excludeTxnId ?? -1, actions.categoryId, actions.merchant],
   );
-  return res.rows.filter((row) => evaluate(definition.when, toSubject(row)));
+  const out: BackfillCandidate[] = [];
+  for (const row of res.rows) {
+    if (!matches({ definition }, row)) continue;
+    const merchant = actions.merchant !== null && merchantFillable(row) && row.merchant !== actions.merchant ? actions.merchant : null;
+    const categoryId =
+      actions.categoryId !== null && row.category_provenance !== "manual" && row.category_id !== actions.categoryId
+        ? actions.categoryId
+        : null;
+    if (merchant !== null || categoryId !== null) out.push({ row, merchant, categoryId });
+  }
+  return out;
 }
 
 /** Sets a transaction's category from a rule, marking it for write-through. */
@@ -95,15 +146,39 @@ async function setFromRule(
   );
 }
 
+/**
+ * Fills in a transaction's merchant from a rule, marking it for write-through. Its merchant
+ * key follows, so merchant rules ("always categorize Starbucks as …") reach it from now on;
+ * `needsRules` sends it back through them.
+ */
+async function setMerchantFromRule(
+  db: Queryable,
+  row: TxnRow,
+  rule: { id: number },
+  merchant: string,
+  needsRules: boolean,
+): Promise<TxnRow> {
+  const res = await db.query<TxnRow>(
+    `UPDATE txn SET merchant = $2, merchant_key = $3, merchant_provenance = $4,
+       merchant_dirty = ($2::text IS DISTINCT FROM backend_merchant), needs_rules = $5
+     WHERE id = $1 RETURNING *`,
+    [row.id, merchant, merchantKey(merchant, row.description), `rule:${rule.id}`, needsRules],
+  );
+  return res.rows[0]!;
+}
+
 export async function backfill(
   db: Queryable,
   rule: { id: number; version: number; definition: RuleDefinition },
   ctx: { actor: string; uiContext?: UiContext; excludeTxnId?: number; categories: CategoryIndex },
 ): Promise<number> {
-  const rows = await backfillCandidates(db, rule.definition, { excludeTxnId: ctx.excludeTxnId, forUpdate: true });
+  const candidates = await backfillCandidates(db, rule.definition, { excludeTxnId: ctx.excludeTxnId, forUpdate: true });
   const newProvenance = `rule:${rule.id}`;
-  for (const row of rows) {
-    await setFromRule(db, row, rule, rule.definition.then.categoryId, ctx.categories);
+  const setsMerchant = ruleActions(rule.definition).merchant !== null;
+  for (const { row, merchant, categoryId } of candidates) {
+    // A new merchant with no category from this rule: the merchant rules get a look at it.
+    if (merchant !== null) await setMerchantFromRule(db, row, rule, merchant, categoryId === null);
+    if (categoryId !== null) await setFromRule(db, row, rule, categoryId, ctx.categories);
     await appendDecision(db, {
       actor: ctx.actor,
       action: "rule_backfill",
@@ -111,15 +186,16 @@ export async function backfill(
       txnSnapshot: snapshot(row),
       oldCategoryId: row.category_id,
       oldProvenance: row.category_provenance,
-      newCategoryId: rule.definition.then.categoryId,
-      newProvenance,
+      newCategoryId: categoryId ?? row.category_id,
+      newProvenance: categoryId !== null ? newProvenance : row.category_provenance,
+      ...(setsMerchant ? { oldMerchant: row.merchant, newMerchant: merchant ?? row.merchant } : {}),
       ruleId: rule.id,
       ruleVersion: rule.version,
       ruleDefinition: rule.definition,
       uiContext: ctx.uiContext,
     });
   }
-  return rows.length;
+  return candidates.length;
 }
 
 export interface SaveRuleResult {
@@ -187,9 +263,11 @@ export async function saveRule(
     action,
     txnId: input.sourceTxn?.id ?? null,
     txnSnapshot: input.sourceTxn ? snapshot(input.sourceTxn) : null,
-    oldCategoryId: previous?.then.categoryId ?? null,
-    newCategoryId: input.definition.then.categoryId,
+    oldCategoryId: previous ? ruleActions(previous).categoryId : null,
+    newCategoryId: ruleActions(input.definition).categoryId,
     newProvenance: `rule:${ruleId}`,
+    oldMerchant: previous ? ruleActions(previous).merchant : null,
+    newMerchant: ruleActions(input.definition).merchant,
     ruleId,
     ruleVersion: version,
     ruleDefinition: input.definition,
@@ -202,6 +280,8 @@ export async function saveRule(
         { actor: input.actor, uiContext: input.uiContext, excludeTxnId: input.sourceTxn?.id, categories: input.categories },
       )
     : 0;
+  // Merchants just filled in: the merchant rules have a look at them now, not at the next sync.
+  if (backfilled > 0 && ruleActions(input.definition).merchant !== null) await applyRulesToPending(db, input.categories);
   return { id: ruleId, version, action, backfilled };
 }
 
@@ -212,7 +292,8 @@ export async function deleteRule(db: Queryable, ruleId: number, actor: string, u
   await appendDecision(db, {
     actor,
     action: "rule_delete",
-    oldCategoryId: rule.definition.then.categoryId,
+    oldCategoryId: ruleActions(rule.definition).categoryId,
+    oldMerchant: ruleActions(rule.definition).merchant,
     ruleId,
     ruleVersion: rule.version,
     ruleDefinition: rule.definition,
@@ -221,21 +302,26 @@ export async function deleteRule(db: Queryable, ruleId: number, actor: string, u
 }
 
 /**
- * Runs the rules over new and changed transactions (`needs_rules`). Returns how many
- * changed category.
+ * Runs the rules over new and changed transactions (`needs_rules`). Returns how many changed
+ * merchant or category.
  */
 export async function applyRulesToPending(db: Queryable, categories: CategoryIndex): Promise<number> {
   const rules = await loadActiveRules(db);
   const pending = await db.query<TxnRow>("SELECT * FROM txn WHERE needs_rules AND deleted_at IS NULL ORDER BY id");
   let changed = 0;
   for (const row of pending.rows) {
-    const protectedLabel = row.category_provenance === "manual" || row.category_provenance === "backend";
-    const rule = protectedLabel ? undefined : firstMatch(rules, row);
-    const target = rule?.definition.then.categoryId;
-    if (rule && target && categories.has(target) && (row.category_id !== target || row.category_provenance !== `rule:${rule.id}`)) {
-      await setFromRule(db, row, rule, target, categories);
-      changed += 1;
+    let current = row;
+    const named = merchantMatch(rules, row);
+    const merchant = named ? ruleActions(named.definition).merchant : null;
+    if (named && merchant !== null && (row.merchant !== merchant || row.merchant_provenance !== `rule:${named.id}`)) {
+      current = await setMerchantFromRule(db, row, named, merchant, false);
     }
+    const protectedLabel = current.category_provenance === "manual" || current.category_provenance === "backend";
+    const rule = protectedLabel ? undefined : categoryMatch(rules, current, categories);
+    const target = rule ? ruleActions(rule.definition).categoryId : null;
+    const recategorized = rule && target !== null && (current.category_id !== target || current.category_provenance !== `rule:${rule.id}`);
+    if (recategorized) await setFromRule(db, current, rule, target, categories);
+    if (current !== row || recategorized) changed += 1;
   }
   await db.query("UPDATE txn SET needs_rules = false WHERE needs_rules AND id = ANY($1)", [pending.rows.map((r) => r.id)]);
   return changed;

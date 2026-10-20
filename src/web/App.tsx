@@ -9,6 +9,7 @@ import { CategoryTree } from "./categories.js";
 import { AccountFilter } from "./components/AccountFilter.js";
 import { Chart } from "./components/Chart.js";
 import { RecategorizeSheet } from "./components/RecategorizeSheet.js";
+import { RulesBuilder } from "./components/RulesBuilder.js";
 import { TxnList } from "./components/TxnList.js";
 import { formatMoneyShort, formatRange, formatSyncTime, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
 import { clearSnapshot, loadSnapshot, saveSnapshot, type Snapshot } from "./store.js";
@@ -21,6 +22,8 @@ import { chartTheme, useDarkMode } from "./theme.js";
 // (`range=30d`), so the link still means "the last 30 days" tomorrow; only a custom range is
 // kept as dates (`from`, `to`).
 //
+// The rules builder is a tab like the reports (`r=rules-builder`), with no range or drill path.
+//
 // The account filter (`accounts=a,b`, absent for all) is read from the URL only when the page
 // loads: from then on it sticks, through report tabs, links between reports, and the back
 // button, until it is changed with the filter itself.
@@ -32,8 +35,13 @@ interface ViewState extends ReportQuery {
 
 const presetView = (range: RangePreset) => ({ range, ...presetRange(range) });
 
+/** The rules builder's place among the report tabs. */
+const BUILDER = "rules-builder";
+
 function readUrl(): ViewState {
   const params = new URLSearchParams(window.location.search);
+  const accounts = params.has("accounts") ? (params.get("accounts") ?? "").split(",").filter(Boolean).map(decodeURIComponent) : null;
+  if (params.get("r") === BUILDER) return { reportId: BUILDER, ...presetView(REPORTS[0]!.defaultRange), path: [], accounts };
   const report = findReport(params.get("r") ?? "") ?? REPORTS[0]!;
   const valid = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
   const range = params.get("range");
@@ -44,12 +52,13 @@ function readUrl(): ViewState {
     reportId: report.id,
     ...dates,
     path: (params.get("p") ?? "").split("/").filter(Boolean).map(decodeURIComponent),
-    accounts: params.has("accounts") ? (params.get("accounts") ?? "").split(",").filter(Boolean).map(decodeURIComponent) : null,
+    accounts,
   };
 }
 
 function writeUrl(v: ViewState, push: boolean) {
-  const params = new URLSearchParams({ r: v.reportId, ...(v.range ? { range: v.range } : { from: v.from, to: v.to }) });
+  const builder = v.reportId === BUILDER;
+  const params = new URLSearchParams({ r: v.reportId, ...(builder ? {} : v.range ? { range: v.range } : { from: v.from, to: v.to }) });
   if (v.path.length) params.set("p", v.path.map(encodeURIComponent).join("/"));
   if (v.accounts) params.set("accounts", v.accounts.map(encodeURIComponent).join(","));
   const url = `${window.location.pathname}?${params}`;
@@ -133,6 +142,7 @@ export function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
   const report = findReport(view.reportId) ?? REPORTS[0]!;
+  const onBuilder = view.reportId === BUILDER;
 
   // --- Data: the copy kept on this device at once, then the server's ----------------------
 
@@ -348,6 +358,16 @@ export function App() {
 
   const closeSheet = useCallback(() => setOpenTxn(null), []);
 
+  // A rule from the rules builder changed merchants and categories on the server: say what,
+  // and bring the transactions (the reports' and the copy on this device) up to date.
+  const onRuleSaved = useCallback((text: string) => {
+    setToast({ id: Date.now(), text });
+    api
+      .transactions()
+      .then(setTxns)
+      .catch((err: Error) => setToast({ id: Date.now(), text: err.message, error: true }));
+  }, []);
+
   // Log out: the server's session ends, and the copy of the data on this device goes, even when
   // the server is out of reach (its session then ends on its own once idle).
   const logOut = useCallback(async () => {
@@ -490,8 +510,8 @@ export function App() {
             <button
               key={r.id}
               type="button"
-              className={`tab${r.id === report.id ? " active" : ""}`}
-              aria-current={r.id === report.id ? "page" : undefined}
+              className={`tab${!onBuilder && r.id === report.id ? " active" : ""}`}
+              aria-current={!onBuilder && r.id === report.id ? "page" : undefined}
               onClick={() => {
                 navigate({ reportId: r.id, ...presetView(r.defaultRange), path: [], accounts: view.accounts });
                 window.scrollTo({ top: 0 });
@@ -501,10 +521,27 @@ export function App() {
               {r.shortTitle}
             </button>
           ))}
+          <button
+            type="button"
+            className={`tab${onBuilder ? " active" : ""}`}
+            aria-current={onBuilder ? "page" : undefined}
+            onClick={() => {
+              navigate({ ...view, reportId: BUILDER, path: [] });
+              window.scrollTo({ top: 0 });
+            }}
+            title="Fill in missing merchants and categories with rules"
+            data-testid={`report-${BUILDER}`}
+          >
+            Rules
+          </button>
         </nav>
       </header>
 
       <div className="page">
+      {onBuilder ? (
+        <div className="builder">{categories ? <RulesBuilder categories={categories} onSaved={onRuleSaved} /> : <p className="empty">Loading…</p>}</div>
+      ) : (
+      <>
       <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)}>
       <div className="range-bar" role="group" aria-label="Date range">
         {(Object.keys(RANGE_LABELS) as RangePreset[]).map((p) => (
@@ -637,6 +674,8 @@ export function App() {
         />
       )}
       </div>
+      </>
+      )}
       </div>
 
       {openTxn && categories && (

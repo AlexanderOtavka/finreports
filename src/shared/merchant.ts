@@ -57,11 +57,24 @@ export function merchantDisplay(merchant: string | null | undefined, description
   const cleaned = cleanDescription(description);
   // Raw descriptions are usually SHOUTING; title-case them for display.
   return cleaned === cleaned.toUpperCase()
-    ? cleaned.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase())
+    ? cleaned.toLowerCase().replace(/(^|[^a-z0-9'’])([a-z])/g, (_, before: string, c: string) => before + c.toUpperCase())
     : cleaned;
 }
 
 /** The key rules and suggestions match on. */
 export function merchantKey(merchant: string | null | undefined, description: string): string {
   return normalizeText(merchantDisplay(merchant, description));
+}
+
+/**
+ * The description reduced to what stays the same from one charge to the next, whatever the
+ * merchant is: the cleaned description, without the words that carry a number (store numbers,
+ * order and trip references, "8PM"). Transactions with the same key are one group in the rules
+ * builder, and a `descriptionKey` predicate matches on it, so a rule that sets the merchant
+ * still matches once the merchant has changed.
+ */
+export function descriptionKey(description: string): string {
+  const words = normalizeText(cleanDescription(description)).split(" ");
+  const kept = words.filter((w) => !(w.length >= 3 && /\d/.test(w)));
+  return (kept.length > 0 ? kept : words).join(" ");
 }
