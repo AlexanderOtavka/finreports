@@ -30,6 +30,7 @@
   --navbar: #3c8dbc;
   --logo: #367fa9;
   --navbar-ink: #ffffff;
+  --brand-ink: #ffffff;
   --btn: #f4f4f4;
   --btn-ink: #444444;
   --radius: 3px;
@@ -48,29 +49,32 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #222d32;
-    --surface: #2c3b41;
-    --surface-2: #34464d;
-    --hover: #34464d;
-    --border: #415761;
-    --border-soft: #374850;
-    --text: #e8ecee;
-    --text-2: #b8c7ce;
-    --text-3: #8aa4af;
+    /* Firefly III's dark skin: neutral grays, not AdminLTE's blue-tinted ones, and dim enough
+       for an OLED screen. The navbar and the boxes share the darker gray; the page is lighter. */
+    --bg: #363c41;
+    --surface: #282c30;
+    --surface-2: #30353a;
+    --hover: #30353a;
+    --border: #454b51;
+    --border-soft: #363c41;
+    --text: #bfc4ca;
+    --text-2: #a4aab0;
+    --text-3: #868c92;
     --accent: #3c8dbc;
     --accent-dark: #367fa9;
-    --accent-soft: #24475d;
+    --accent-soft: #263c4d;
     --link: #72afd2;
-    --outflow: #f1786a;
-    --inflow: #3fd38f;
+    --outflow: #e0756a;
+    --inflow: #3fbf84;
     --transfer: #72afd2;
-    --label-default: #4b636e;
-    --label-default-ink: #e8ecee;
-    --error: #f1786a;
-    --navbar: #2a6a90;
-    --logo: #245c7d;
-    --btn: #34464d;
-    --btn-ink: #e8ecee;
+    --label-default: #454b51;
+    --label-default-ink: #bfc4ca;
+    --error: #e0756a;
+    --navbar: #282c30;
+    --logo: #282c30;
+    --brand-ink: #6fa2c8;
+    --btn: #363c41;
+    --btn-ink: #bfc4ca;
     --shadow: 0 1px 1px rgb(0 0 0 / 30%);
   }
 }
@@ -159,7 +163,7 @@ a {
   display: flex;
   align-items: center;
   padding: 0 15px;
-  color: var(--navbar-ink);
+  color: var(--brand-ink);
   white-space: nowrap;
 }
 .brand b {
