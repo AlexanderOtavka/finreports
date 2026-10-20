@@ -36,11 +36,14 @@ const uiContext = z
   .optional();
 const recategorizeBody = z
   .object({
-    categoryId: z.string().min(1).max(200),
+    categoryId: z.string().min(1).max(200).optional(),
+    merchant: z.string().trim().min(1).max(200).optional(),
+    rule: z.object({ definition: z.unknown(), applyToPast: z.boolean() }).strict().optional(),
     uiContext,
     merchantRule: z.object({ applyToPast: z.boolean() }).strict().optional(),
   })
-  .strict();
+  .strict()
+  .refine((b) => b.categoryId !== undefined || b.merchant !== undefined || b.rule !== undefined, "nothing to change");
 const ruleBody = z.object({ definition: z.unknown(), applyToPast: z.boolean().default(false), uiContext }).strict();
 const previewBody = z.object({ definition: z.unknown(), excludeTxnId: z.number().int().optional() }).strict();
 const categoryBody = z.object({ name: z.string().min(1).max(80), parentId: z.string().max(200).nullable().default(null) }).strict();

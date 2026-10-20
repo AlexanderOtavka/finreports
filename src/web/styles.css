@@ -1470,14 +1470,6 @@ a {
   font-size: 0.85rem;
   color: var(--text-3);
 }
-.builder-group-desc,
-.candidate-example-desc,
-.candidate-evidence-desc {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-  color: var(--text-2);
-  overflow-wrap: anywhere;
-}
 .builder-group-tags {
   display: flex;
   gap: 0.35rem;
@@ -1523,25 +1515,66 @@ a {
   background: var(--label-default);
   color: var(--label-default-ink);
 }
-.proposal-descs {
+/* --- The sheet's sections: what it looks like, merchant, category, rule ------------------ */
+
+.sheet-merchant-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet-descs {
   list-style: none;
   margin: 0.35rem 0 0;
   padding: 0;
 }
-.proposal-candidates {
+.sheet-section-note {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.sheet-hint,
+.sheet-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-3);
+}
+.sheet-note {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.sheet-input {
+  margin: 0;
+}
+.link-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--link);
+  font-size: inherit;
+  cursor: pointer;
+}
+.browse-all {
+  padding-left: 0;
+}
+.mono,
+.builder-group-desc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.candidates {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 .candidate {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.2rem;
   text-align: left;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  padding: 0.5rem 0.65rem;
+  padding: 0.45rem 0.65rem;
   cursor: pointer;
 }
 .candidate:hover {
@@ -1556,68 +1589,85 @@ a {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  min-width: 0;
 }
 .candidate-cat {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.candidate-why {
+.candidate-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   font-size: 0.82rem;
-}
-.candidate-why:empty {
-  display: none;
 }
 .candidate-evidence,
 .candidate-examples {
   list-style: none;
-  margin: 0.2rem 0 0;
+  margin: 0;
   padding: 0;
   font-size: 0.8rem;
 }
 .candidate-examples {
   border-top: 1px solid var(--border);
-  padding-top: 0.25rem;
+  padding-top: 0.2rem;
 }
-.proposal-when {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
+.sheet-rule {
+  margin-top: 0.9rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-soft);
 }
-.proposal-when code {
+.sheet-rule .toggle-row .sheet-section {
+  margin: 0;
+}
+.match-options {
+  margin-top: 0.5rem;
+}
+.rule-summary {
+  margin: 0.5rem 0 0;
+  font-size: 0.92rem;
+}
+.rule-summary code {
   font-size: 0.82rem;
   background: var(--surface-2);
   border-radius: var(--radius);
   padding: 0.05rem 0.3rem;
 }
-.proposal-merchant {
-  margin: 0.4rem 0 0.6rem;
+.sheet-group-txns {
+  margin-top: 0.9rem;
 }
-.proposal-toggle {
-  margin-top: 0.4rem;
+.sheet-group-txns summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-2);
+  padding: 0.25rem 0;
 }
-.proposal-cats {
-  margin-top: 0.5rem;
-}
-.proposal-txns {
+.sheet-txns {
   list-style: none;
   margin: 0;
   padding: 0;
   font-size: 0.85rem;
 }
-.proposal-txns li {
+.sheet-txns li {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.35rem 0;
   border-top: 1px solid var(--border-soft);
 }
-.proposal-txn-main {
+.sheet-txn-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-.proposal-txns .muted {
+.sheet-txns .muted {
   font-size: 0.78rem;
 }
-.proposal-error {
+.sheet-error {
   margin: 0;
   font-size: 0.9rem;
 }

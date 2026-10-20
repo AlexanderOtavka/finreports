@@ -132,3 +132,14 @@ export function descriptionKeyRule(key: string, then: { merchant?: string; categ
     },
   };
 }
+
+/**
+ * The rule the sheet saves: when `when`, set this merchant and this category. Schema 1 when it
+ * sets only a category (as "always categorize" always has), schema 2 when it sets a merchant;
+ * null when it sets nothing.
+ */
+export function ruleFor(when: Predicate, then: { merchant?: string | null; categoryId?: string | null }): RuleDefinition | null {
+  if (then.merchant) return { schema: 2, when, then: { merchant: then.merchant, ...(then.categoryId ? { categoryId: then.categoryId } : {}) } };
+  if (then.categoryId) return { schema: 1, when, then: { categoryId: then.categoryId } };
+  return null;
+}

@@ -34,6 +34,11 @@ export interface TxnDto {
   categoryId: string | null;
   /** `plaid`, `backend`, `manual`, `rule:<id>`, or `none`. */
   provenance: string;
+  /**
+   * Where `merchant` comes from: `none` (there is none; it is the cleaned description), the
+   * backend's import (`backend`), someone changing it there (`edited`), `manual`, or `rule:<id>`.
+   */
+  merchantSource: string;
 }
 
 /** An account transactions move money in or out of (an asset account, in Firefly's terms). */
@@ -73,10 +78,16 @@ export interface UiContext {
   surface?: string;
 }
 
+/** A person's change to one transaction; at least one of the three. */
 export interface RecategorizeRequest {
-  categoryId: string;
+  /** Its category, from now on `manual`. */
+  categoryId?: string;
+  /** Its merchant, from now on `manual`. */
+  merchant?: string;
+  /** A rule to save at the same time (and, with `applyToPast`, apply to past transactions). */
+  rule?: { definition: unknown; applyToPast: boolean };
   uiContext?: UiContext;
-  /** Create an "always categorize this merchant as X" rule at the same time. */
+  /** Older apps: an "always categorize this merchant as X" rule. */
   merchantRule?: { applyToPast: boolean };
 }
 
@@ -117,6 +128,11 @@ export interface SuggestionsDto {
   likely: string[];
   /** Categories recently chosen by hand, most recent first. */
   recent: string[];
+  /**
+   * For a transaction missing a merchant or a category: the merchants it looks like, best
+   * first, as in the rules builder.
+   */
+  candidates: BuilderCandidateDto[];
 }
 
 export interface RulePreviewCounts extends RulePreview {

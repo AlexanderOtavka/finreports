@@ -2,7 +2,7 @@ import type { Writable } from "node:stream";
 import type { UiContext } from "../shared/api.js";
 import type { Db, Queryable } from "./db.js";
 
-export type DecisionAction = "recategorize" | "rule_create" | "rule_update" | "rule_delete" | "rule_backfill";
+export type DecisionAction = "recategorize" | "rename" | "rule_create" | "rule_update" | "rule_delete" | "rule_backfill";
 
 export interface DecisionEvent {
   actor: string;

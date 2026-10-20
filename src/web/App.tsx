@@ -4,11 +4,13 @@ import { findReport, REPORTS } from "../reports/index.js";
 import { inScope, runReport, selection, toReportTxn } from "../reports/run.js";
 import type { RangePreset } from "../reports/types.js";
 import type { AccountDto, RecategorizeRequest, TxnDto } from "../shared/api.js";
+import { merchantKey } from "../shared/merchant.js";
+import { evaluate, ruleActions, ruleDefinitionSchema } from "../shared/rules.js";
 import { api, ApiError, isOffline, login, type ReportQuery } from "./api.js";
 import { CategoryTree } from "./categories.js";
 import { AccountFilter } from "./components/AccountFilter.js";
 import { Chart } from "./components/Chart.js";
-import { RecategorizeSheet } from "./components/RecategorizeSheet.js";
+import { RuleSheet } from "./components/RuleSheet.js";
 import { RulesBuilder } from "./components/RulesBuilder.js";
 import { TxnList } from "./components/TxnList.js";
 import { formatMoneyShort, formatRange, formatSyncTime, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
@@ -313,16 +315,29 @@ export function App() {
       const txn = openTxn;
       if (!txn || !categories || !txns) return;
       setOpenTxn(null);
-      // Optimistic: the chart and the list show the new category at once (and, with a
-      // backfilled rule, so does every transaction from the same merchant not set by hand).
+      // Optimistic: the chart and the list show the change at once, and, with a rule applied to
+      // the past, a guess at the transactions it reaches (not ones set by hand).
       const before = txns;
       const touched = new Set<number>([txn.id]);
+      const rule = req.rule?.applyToPast ? ruleDefinitionSchema.safeParse(req.rule.definition) : null;
+      const ruleThen = rule?.success ? ruleActions(rule.data) : null;
       setTxns((list) =>
         list!.map((t) => {
-          if (t.id === txn.id) return { ...t, categoryId: req.categoryId, provenance: "manual" };
-          if (req.merchantRule?.applyToPast && t.merchantKey === txn.merchantKey && t.provenance !== "manual") {
-            touched.add(t.id);
-            return { ...t, categoryId: req.categoryId, provenance: "rule:new" };
+          if (t.id === txn.id) {
+            return {
+              ...t,
+              ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
+              ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
+            };
+          }
+          if (rule?.success && ruleThen && evaluate(rule.data.when, { merchant: t.merchantSource === "none" ? null : t.merchant, description: t.description, accountName: t.accountName, amount: t.amount })) {
+            const next = { ...t };
+            if (ruleThen.categoryId && t.provenance !== "manual") Object.assign(next, { categoryId: ruleThen.categoryId, provenance: "rule:new" });
+            if (ruleThen.merchant && t.merchantSource !== "manual" && t.type !== "transfer") {
+              Object.assign(next, { merchant: ruleThen.merchant, merchantKey: merchantKey(ruleThen.merchant, t.description), merchantSource: "rule:new" });
+            }
+            if (next.categoryId !== t.categoryId || next.merchant !== t.merchant) touched.add(t.id);
+            return next;
           }
           return t;
         }),
@@ -330,17 +345,17 @@ export function App() {
       setFlash(touched);
       try {
         const res = await api.recategorize(txn.id, req);
-        const name = categories.name(req.categoryId);
+        const what = [req.merchant, req.categoryId ? categories.name(req.categoryId) : null].filter(Boolean).join(", ");
         const extra = res.rule
           ? res.rule.backfilled > 0
-            ? ` · rule saved, ${res.rule.backfilled} past ${res.rule.backfilled === 1 ? "transaction" : "transactions"} updated`
-            : " · rule saved"
+            ? `rule saved, ${res.rule.backfilled} past ${res.rule.backfilled === 1 ? "transaction" : "transactions"} updated`
+            : "rule saved"
           : "";
-        setToast({ id: Date.now(), text: `${txn.merchant} → ${name}${extra}` });
-        // The server's word on the transaction; with a rule, on all of them (the rule may reach
-        // further than the guess above). The optimistic list stays until then.
+        setToast({ id: Date.now(), text: [what ? `${txn.merchant} → ${what}` : txn.merchant, extra].filter(Boolean).join(" · ") });
+        // The server's word on the transaction; with a rule or a new merchant (which the rules
+        // may categorize), on all of them. The optimistic list stays until then.
         setTxns((list) => list!.map((t) => (t.id === res.txn.id ? res.txn : t)));
-        if (res.rule) {
+        if (res.rule || req.merchant) {
           api
             .transactions()
             .then(setTxns)
@@ -679,8 +694,8 @@ export function App() {
       </div>
 
       {openTxn && categories && (
-        <RecategorizeSheet
-          txn={openTxn}
+        <RuleSheet
+          subject={{ kind: "txn", txn: openTxn }}
           categories={categories}
           uiContext={uiContext}
           onClose={closeSheet}

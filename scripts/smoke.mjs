@@ -635,15 +635,15 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await tj.scrollIntoViewIfNeeded();
     assert((await tj.getByTestId("builder-match").innerText()).includes("Trader Joe's"), "the group matches Trader Joe's");
     await tj.click();
-    await page.getByTestId("proposal-sheet").waitFor();
+    await page.locator("[data-testid=sheet][data-kind=group]").waitFor();
     assert((await page.getByTestId("candidate").first().getAttribute("aria-checked")) === "true", "the best match is picked");
-    assert((await page.getByTestId("proposal-merchant").inputValue()) === "Trader Joe's", "the merchant is copied from it");
-    await page.getByTestId("proposal-count").waitFor();
-    const proposalCount = Number(await page.getByTestId("proposal-count").innerText());
+    assert((await page.getByTestId("merchant-input").inputValue()) === "Trader Joe's", "the merchant is copied from it");
+    await page.getByTestId("preview-count").waitFor();
+    const proposalCount = Number(await page.getByTestId("preview-count").innerText());
     assert(proposalCount > 5, `the rule would change the group (${proposalCount})`);
     await shot("builder-proposal");
-    await page.getByTestId("proposal-save").click();
-    await page.getByTestId("proposal-sheet").waitFor({ state: "detached" });
+    await page.getByTestId("save").click();
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
     await page.getByTestId("toast").waitFor();
     const builderToast = await page.getByTestId("toast").innerText();
     assert(builderToast.includes(`${proposalCount} transactions updated`), `the toast says what the rule did (${builderToast})`);
@@ -653,11 +653,10 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await shot("builder-after");
     // A group with nothing to copy from: name it yourself.
     await page.locator('[data-testid=builder-group][data-key="key food"]').click();
-    await page.getByTestId("proposal-sheet").waitFor();
-    assert((await page.getByTestId("candidate-own").getAttribute("aria-checked")) === "true", "no match: name it yourself");
+    await page.getByTestId("no-candidates").waitFor();
     await shot("builder-no-match");
     await page.keyboard.press("Escape");
-    await page.getByTestId("proposal-sheet").waitFor({ state: "detached" });
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
     // Back to the reports.
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();

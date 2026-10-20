@@ -217,7 +217,7 @@ describe("schema 2 rules", () => {
   });
 });
 
-describe("rules that fill in the merchant", async () => {
+describe("rules that set the merchant", async () => {
   const db = await freshDb();
   const categories = await CategoryIndex.load(db);
   const GROCERIES = "food-and-drink.groceries";
@@ -225,14 +225,32 @@ describe("rules that fill in the merchant", async () => {
 
   let n = 0;
   /** A transaction as the backend has it: `merchant` is the backend's too. */
-  async function add(f: { merchant?: string | null; description: string; category?: string | null; provenance?: string; type?: string; needsRules?: boolean }) {
+  async function add(f: {
+    merchant?: string | null;
+    merchantProvenance?: string;
+    description: string;
+    category?: string | null;
+    provenance?: string;
+    type?: string;
+    needsRules?: boolean;
+  }) {
     n += 1;
     const merchant = f.merchant ?? null;
     const res = await db.query<{ id: number }>(
       `INSERT INTO txn (backend, external_id, date, amount, type, merchant, backend_merchant, merchant_key, description,
-         category_id, category_provenance, needs_rules)
-       VALUES ('sample', $1, '2025-05-01', -20, $2, $3, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [`m${n}`, f.type ?? "withdrawal", merchant, merchantKey(merchant, f.description), f.description, f.category ?? null, f.provenance ?? "none", f.needsRules ?? false],
+         category_id, category_provenance, needs_rules, merchant_provenance)
+       VALUES ('sample', $1, '2025-05-01', -20, $2, $3, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [
+        `m${n}`,
+        f.type ?? "withdrawal",
+        merchant,
+        merchantKey(merchant, f.description),
+        f.description,
+        f.category ?? null,
+        f.provenance ?? "none",
+        f.needsRules ?? false,
+        f.merchantProvenance ?? "backend",
+      ],
     );
     return res.rows[0]!.id;
   }
@@ -250,10 +268,11 @@ describe("rules that fill in the merchant", async () => {
   const csvB = await add({ description: "TRADER JOE'S #561" });
   const manual = await add({ description: "TRADER JOE'S #558", category: "food-and-drink.coffee", provenance: "manual" });
   const named = await add({ merchant: "Joe's Corner", description: "TRADER JOE'S #9", category: "general-merchandise.other-general-merchandise", provenance: "plaid" });
+  const byHand = await add({ merchant: "Joe's Corner", merchantProvenance: "manual", description: "TRADER JOE'S #10", category: "general-merchandise.other-general-merchandise", provenance: "plaid" });
   const transfer = await add({ description: "TRADER JOE'S #558", type: "transfer" });
   const rule = descriptionKeyRule("trader joes", { merchant: "Trader Joe's", categoryId: GROCERIES });
 
-  it("previews: the merchant only where the backend has none, the category never over one set by hand", async () => {
+  it("previews: the merchant and the category, never over ones set by hand", async () => {
     const found = await backfillCandidates(db, rule);
     const byId = new Map(found.map((c) => [c.row.id, { merchant: c.merchant, categoryId: c.categoryId }]));
     expect(byId).toEqual(
@@ -261,14 +280,15 @@ describe("rules that fill in the merchant", async () => {
         [csvA, { merchant: "Trader Joe's", categoryId: GROCERIES }],
         [csvB, { merchant: "Trader Joe's", categoryId: GROCERIES }],
         [manual, { merchant: "Trader Joe's", categoryId: null }],
-        [named, { merchant: null, categoryId: GROCERIES }],
+        [named, { merchant: "Trader Joe's", categoryId: GROCERIES }],
+        [byHand, { merchant: null, categoryId: GROCERIES }],
       ]),
     );
   });
 
   it("backfills both, marks both for write-through, and logs the merchant", async () => {
     const saved = await save(rule);
-    expect(saved).toMatchObject({ action: "rule_create", version: 1, backfilled: 4 });
+    expect(saved).toMatchObject({ action: "rule_create", version: 1, backfilled: 5 });
     const p = `rule:${saved.id}`;
     expect(await row(csvA)).toEqual({
       merchant: "Trader Joe's",
@@ -280,7 +300,9 @@ describe("rules that fill in the merchant", async () => {
       backend_dirty: true,
     });
     expect(await row(manual)).toMatchObject({ merchant: "Trader Joe's", category_id: "food-and-drink.coffee", category_provenance: "manual" });
-    expect(await row(named)).toMatchObject({ merchant: "Joe's Corner", merchant_provenance: "backend", merchant_dirty: false, category_id: GROCERIES });
+    // A merchant the backend has is renamed (and written back); one named by hand is not.
+    expect(await row(named)).toMatchObject({ merchant: "Trader Joe's", merchant_provenance: p, merchant_dirty: true, category_id: GROCERIES });
+    expect(await row(byHand)).toMatchObject({ merchant: "Joe's Corner", merchant_provenance: "manual", merchant_dirty: false, category_id: GROCERIES });
     expect(await row(transfer)).toMatchObject({ merchant: null, category_id: null });
 
     const events = await db.query("SELECT action, txn_id, old_merchant, new_merchant, old_category_id, new_category_id, new_provenance, schema_version FROM decision_event ORDER BY id");
@@ -288,14 +310,15 @@ describe("rules that fill in the merchant", async () => {
     const backfills = new Map(events.rows.slice(1).map((e) => [e.txn_id, e]));
     expect(backfills.get(csvA)).toMatchObject({ action: "rule_backfill", old_merchant: null, new_merchant: "Trader Joe's", old_category_id: null, new_category_id: GROCERIES, new_provenance: p });
     expect(backfills.get(manual)).toMatchObject({ old_merchant: null, new_merchant: "Trader Joe's", old_category_id: "food-and-drink.coffee", new_category_id: "food-and-drink.coffee", new_provenance: "manual" });
-    expect(backfills.get(named)).toMatchObject({ old_merchant: "Joe's Corner", new_merchant: "Joe's Corner", new_category_id: GROCERIES });
+    expect(backfills.get(named)).toMatchObject({ old_merchant: "Joe's Corner", new_merchant: "Trader Joe's", new_category_id: GROCERIES });
+    expect(backfills.get(byHand)).toMatchObject({ old_merchant: "Joe's Corner", new_merchant: "Joe's Corner", new_category_id: GROCERIES });
   });
 
-  it("an \"always categorize\" rule for the merchant reaches the transactions it was filled in on", async () => {
+  it("an \"always categorize\" rule for the merchant reaches the transactions it named", async () => {
     const saved = await save(merchantKeyRule("trader joes", RESTAURANT));
-    // csvA and csvB, and (as merchant rules always have) the transfer, whose key is its
-    // description; not Joe's Corner, and not the one set by hand.
-    expect(saved.backfilled).toBe(3);
+    // csvA, csvB and the renamed one, and (as merchant rules always have) the transfer, whose key
+    // is its description; not the one still named Joe's Corner, and not the one set by hand.
+    expect(saved.backfilled).toBe(4);
     expect(await row(csvB)).toMatchObject({ merchant: "Trader Joe's", category_id: RESTAURANT, category_provenance: `rule:${saved.id}` });
   });
 
@@ -322,4 +345,16 @@ describe("rules that fill in the merchant", async () => {
     // Like any rule after a sync, the merchant's leaves a category chosen in the backend alone.
     expect(await row(b)).toMatchObject({ merchant: "Key Food", category_id: "general-merchandise.convenience-stores", category_provenance: "backend" });
   });
+
+  it("after a sync, leaves a merchant renamed in the ledger alone; a backfill someone asks for does not", async () => {
+    const edited = await add({ merchant: "TJ's", merchantProvenance: "edited", description: "TRADER JOE'S #580", needsRules: true });
+    await applyRulesToPending(db, categories);
+    expect(await row(edited)).toMatchObject({ merchant: "TJ's", merchant_provenance: "edited" });
+    // Saving the rule that names Trader Joe's again, applied to the past, does.
+    const named = (await loadActiveRules(db)).find((r) => ruleActions(r.definition).merchant === "Trader Joe's")!;
+    const again = await save(named.definition);
+    expect(again.action).toBe("rule_update");
+    expect(await row(edited)).toMatchObject({ merchant: "Trader Joe's", merchant_provenance: `rule:${named.id}` });
+  });
+
 });

@@ -230,9 +230,9 @@ describe("merchants filled in by a rule", async () => {
     expect(adapter.merchantWrites).toContainEqual(["c2", "Trader Joe's"]);
   });
 
-  it("takes a merchant renamed in the backend as the backend's", async () => {
+  it("takes a merchant renamed in the backend as someone's choice there, which rules leave alone", async () => {
     adapter.next = { txns: [csv({ merchant: "TJ's", counterparty: "TJ's", category: "Groceries" })], removed: [], cursor: "m3", completeFrom: null };
     expect(await sync.run()).toMatchObject({ updated: 1, pushed: 0 });
-    expect(await row()).toMatchObject({ merchant: "TJ's", backend_merchant: "TJ's", merchant_provenance: "backend", merchant_dirty: false });
+    expect(await row()).toMatchObject({ merchant: "TJ's", backend_merchant: "TJ's", merchant_provenance: "edited", merchant_dirty: false });
   });
 });

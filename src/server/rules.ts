@@ -6,7 +6,7 @@ import type { CategoryIndex } from "./categories.js";
 import type { Queryable } from "./db.js";
 import { appendDecision } from "./decisions.js";
 import { HttpError } from "./errors.js";
-import { backendSubject, merchantFillable, snapshot, toSubject, type TxnRow } from "./txns.js";
+import { backendSubject, merchantSettable, snapshot, toSubject, type TxnRow } from "./txns.js";
 
 /**
  * The rules engine. Rules are versioned data (`rule` + `rule_version`); the newest active
@@ -14,10 +14,11 @@ import { backendSubject, merchantFillable, snapshot, toSubject, type TxnRow } fr
  * they also leave `backend` categories alone (someone chose those in the backend); an
  * explicit backfill, which a person asks for, does not.
  *
- * Merchants first, then categories: the newest matching rule that sets a merchant fills in a
- * missing one, and then the newest matching rule that sets a category (looking at the merchant
- * just filled in) sets it. So a rule from the rules builder names an imported transaction, and
- * a later "always categorize <that merchant>" rule reaches it too.
+ * Merchants first, then categories: the newest matching rule that sets a merchant sets it, and
+ * then the newest matching rule that sets a category (looking at the merchant just set) sets
+ * that. So a rule from the rules builder names an imported transaction, and a later "always
+ * categorize <that merchant>" rule reaches it too. Rules never change a merchant set by hand
+ * (`manual`), and after a sync leave one changed in the backend (`edited`) alone.
  */
 export interface ActiveRule {
   id: number;
@@ -66,9 +67,9 @@ export function matches(rule: { definition: RuleDefinition }, row: TxnRow): bool
   return row.type !== "transfer" && evaluate(rule.definition.when, backendSubject(row));
 }
 
-/** The newest rule that sets a merchant and matches, if the merchant is one a rule may set. */
+/** After a sync: the newest rule that sets a merchant and matches, if a rule may set it. */
 export function merchantMatch(rules: ActiveRule[], row: TxnRow): ActiveRule | undefined {
-  if (!merchantFillable(row)) return undefined;
+  if (!merchantSettable(row, true)) return undefined;
   return rules.find((r) => ruleActions(r.definition).merchant !== null && matches(r, row));
 }
 
@@ -98,9 +99,9 @@ export interface BackfillCandidate {
 }
 
 /**
- * Transactions a backfill of `definition` would change: matching, and either missing the
- * merchant it sets (a merchant the backend has is never replaced) or not yet in the category it
- * sets (never one set by hand).
+ * Transactions a backfill of `definition` would change: matching, and either not yet with the
+ * merchant it sets or not yet in the category it sets (never a merchant or a category set by
+ * hand).
  */
 export async function backfillCandidates(
   db: Queryable,
@@ -119,7 +120,7 @@ export async function backfillCandidates(
   const out: BackfillCandidate[] = [];
   for (const row of res.rows) {
     if (!matches({ definition }, row)) continue;
-    const merchant = actions.merchant !== null && merchantFillable(row) && row.merchant !== actions.merchant ? actions.merchant : null;
+    const merchant = actions.merchant !== null && merchantSettable(row, false) && row.merchant !== actions.merchant ? actions.merchant : null;
     const categoryId =
       actions.categoryId !== null && row.category_provenance !== "manual" && row.category_id !== actions.categoryId
         ? actions.categoryId
@@ -147,7 +148,7 @@ async function setFromRule(
 }
 
 /**
- * Fills in a transaction's merchant from a rule, marking it for write-through. Its merchant
+ * Sets a transaction's merchant from a rule, marking it for write-through. Its merchant
  * key follows, so merchant rules ("always categorize Starbucks as …") reach it from now on;
  * `needsRules` sends it back through them.
  */
@@ -176,7 +177,7 @@ export async function backfill(
   const newProvenance = `rule:${rule.id}`;
   const setsMerchant = ruleActions(rule.definition).merchant !== null;
   for (const { row, merchant, categoryId } of candidates) {
-    // A new merchant with no category from this rule: the merchant rules get a look at it.
+    // A new merchant with no category from this rule: the category rules get a look at it.
     if (merchant !== null) await setMerchantFromRule(db, row, rule, merchant, categoryId === null);
     if (categoryId !== null) await setFromRule(db, row, rule, categoryId, ctx.categories);
     await appendDecision(db, {
@@ -280,7 +281,7 @@ export async function saveRule(
         { actor: input.actor, uiContext: input.uiContext, excludeTxnId: input.sourceTxn?.id, categories: input.categories },
       )
     : 0;
-  // Merchants just filled in: the merchant rules have a look at them now, not at the next sync.
+  // Merchants just set: the category rules have a look at them now, not at the next sync.
   if (backfilled > 0 && ruleActions(input.definition).merchant !== null) await applyRulesToPending(db, input.categories);
   return { id: ruleId, version, action, backfilled };
 }

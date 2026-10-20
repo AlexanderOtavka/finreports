@@ -37,8 +37,8 @@ with how many, how much and when, and how many are grouped and how many are left
 group comes with the merchants it looks like: merchants whose transactions have both a
 merchant and a category, and whose own (Plaid) descriptions resemble the group's, with a
 confidence and the evidence (their descriptions, a few of their transactions). Tap a group for
-its proposed rule: the description → that merchant and that category, both editable, with
-what it would change. Saved, it fills in the past transactions and every new one that matches,
+its proposed rule, in the same sheet a transaction opens: the description → that merchant and
+that category, both editable, with what it would change. Saved, it fills in the past transactions and every new one that matches,
 and writes the merchant and the category back to the ledger.
 
 Every report counts all accounts until you check only some of them (the button by the date
@@ -129,13 +129,18 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
 
 ## Categories, rules and provenance
 
-- Tapping a transaction opens the recategorize sheet: suggestions first (what this merchant's
-  other transactions are filed under, Plaid's own guess, and recently chosen categories), then
-  the whole tree, searchable. Saving makes the category `manual`.
-- "Always categorize *Merchant* as X" creates a merchant rule
-  (`{"when": {"merchant": {"equals": "<merchant key>"}}, "then": {"categoryId": "…"}}`). The
-  sheet previews how many past transactions it would change and, if asked, applies it to them
-  (`rule_backfill`). Toggling it again for the same merchant edits that rule (a new version).
+- Tapping a transaction opens its sheet (`src/web/components/RuleSheet.tsx`), the same one a
+  rules builder group opens, top to bottom: the merchants it looks like (only when it is
+  missing a merchant or a category), the merchant's name (rename it), the category
+  (suggestions: what this merchant's other transactions are filed under, Plaid's own guess,
+  recently chosen categories; then search, or browse the whole tree), and "Do this for every
+  transaction like it". Saving makes what you changed `manual`.
+- "Do this for every transaction like it" creates a rule for the same merchant
+  (`{"when": {"merchant": {"equals": "<merchant key>"}}, "then": {"categoryId": "…"}}`) or the
+  same description (`descriptionKey`, below) that sets the category and, if you renamed it, the
+  merchant. The sheet says what the rule does, previews how many past transactions it would
+  change and, if asked, applies it to them (`rule_backfill`). The same predicate again edits
+  that rule (a new version).
 - The merchant key is the backend's cleaned merchant name, or the raw description stripped of
   processor prefixes, store numbers and city (`src/shared/merchant.ts`), so that
   `SQ *SUDS WASH AND FOLD 8832 BROOKLYN NY` and `… 1041 …` are one merchant.
@@ -151,23 +156,27 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   A description key is the cleaned description without the words that carry a number (store
   numbers, references), so the grouping and the rule agree, and it does not depend on the
   merchant, so the rule still matches once it has filled the merchant in.
-- A rule fills in a merchant only where the backend has none (or has only the one a rule wrote
-  to it): it never renames a merchant the backend knows, and leaves transfers alone. Merchants
-  come first: the newest matching rule that sets a merchant fills it in, then the newest
-  matching rule that sets a category (looking at the merchant just filled in) sets that, so
-  "Always categorize Trader Joe's" also reaches the imported Trader Joe's statements. A
-  merchant filled in by a rule is written back to the backend (`merchant_dirty`, retried like
-  a category); a merchant later changed in the backend is the backend's again.
+- Merchants have provenance like categories: the backend's import (`backend`), changed in the
+  backend afterwards (`edited`), `manual`, or `rule:<id>`. Rules never change a `manual`
+  merchant, nor a transfer's (it has none); after a sync they also leave `edited` ones alone,
+  and an explicit backfill does not. A rule that sets a merchant matches the transaction as the
+  backend has it, so renaming it does not change what the rule matches.
+- Merchants come first: the newest matching rule that sets a merchant sets it, then the newest
+  matching rule that sets a category (looking at the merchant just set) sets that, so "Trader
+  Joe's → Groceries" also reaches the imported Trader Joe's statements once a rule has named
+  them. A merchant set here is written back to the backend (`merchant_dirty`, retried like a
+  category); one later changed in the backend is that person's choice (`edited`).
 
 ## The decision log
 
-Every manual recategorization and every rule create/update/delete/backfill appends one
-`decision_event` row: timestamp, actor (the Firefly login email), action, a full snapshot of
-the transaction as it was (merchant, description, amount, account, date, Plaid categories,
+Every manual recategorization or rename and every rule create/update/delete/backfill appends
+one `decision_event` row: timestamp, actor (the Firefly login email), action, a full snapshot
+of the transaction as it was (merchant, description, amount, account, date, Plaid categories,
 prior category and its provenance), old → new category and provenance, old → new merchant
-when a rule that sets one is involved, the rule definition and version if any, and the UI
-context (report, drill path, date range, or the surface, `rules-builder`). Events written since
-merchants can be set say `schemaVersion: 2`. Export it as JSON lines:
+when someone renamed it (action `rename`, when that was all) or a rule that sets one is
+involved, the rule definition and version if any, and the UI context (report, drill path, date
+range, or the surface, `rules-builder`). Events written since merchants can be set say
+`schemaVersion: 2`. Export it as JSON lines:
 
 ```bash
 curl -b "REPORTSSESSION=…" https://firefly.example.com/reports/api/decision-events.jsonl

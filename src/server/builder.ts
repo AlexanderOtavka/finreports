@@ -240,3 +240,14 @@ export async function rulesBuilder(db: Queryable): Promise<BuilderDto> {
   const res = await db.query<TxnRow>("SELECT * FROM txn WHERE deleted_at IS NULL ORDER BY date DESC, id DESC");
   return buildGroups(res.rows);
 }
+
+/** The merchants a transaction missing a merchant or a category looks like; none otherwise. */
+export async function candidatesForTxn(db: Queryable, row: TxnRow): Promise<BuilderCandidateDto[]> {
+  if (!isDeficient(row)) return [];
+  const res = await db.query<TxnRow>(
+    `SELECT * FROM txn
+     WHERE deleted_at IS NULL AND type <> 'transfer' AND merchant IS NOT NULL AND category_id IS NOT NULL
+     ORDER BY date DESC, id DESC`,
+  );
+  return candidatesFor(descriptionKey(row.description), sources(res.rows));
+}

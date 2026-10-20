@@ -245,8 +245,8 @@ export class SyncService {
     });
     // The backend's category moved and it was not us: someone or something there chose it.
     const backendRecategorized = !row.backend_dirty && b.category !== row.backend_category;
-    // Likewise its merchant. One filled in here stays while its write is on the way, and once
-    // the backend has it, the backend's and ours are the same.
+    // Likewise its merchant (`edited`). One set here stays while its write is on the way, and
+    // once the backend has it, the backend's and ours are the same.
     const backendRenamed = !row.merchant_dirty && b.merchant !== row.backend_merchant;
     const merchant = backendRenamed ? b.merchant : row.merchant;
     const merchantChanged = b.merchant !== row.backend_merchant || merchant !== row.merchant;
@@ -262,7 +262,7 @@ export class SyncService {
          merchant_key=$9, description=$10, account_id=$11, account_name=$12, counterparty=$13,
          plaid_primary=$14, plaid_detailed=$15, backend_updated_at=$16, synced_at=now(), deleted_at=NULL,
          needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22, backend_merchant=$23,
-         merchant_provenance=CASE WHEN $24 THEN 'backend' ELSE merchant_provenance END,
+         merchant_provenance=CASE WHEN $24 THEN 'edited' ELSE merchant_provenance END,
          merchant_dirty=(merchant_dirty AND $23::text IS DISTINCT FROM $8::text)
          ${backendRecategorized ? ", backend_category=$25, category_id=$26, category_provenance=$27, category_set_at=now()" : ""}
        WHERE id=$1`,

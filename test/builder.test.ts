@@ -4,8 +4,8 @@ import { buildApp } from "../src/server/app.js";
 import { dice, nameScore, trigrams } from "../src/server/builder.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
 import { SyncService } from "../src/server/sync.js";
-import type { BuilderDto, BuilderGroupDto, RulePreviewCounts, SaveRuleResponse, TxnDto } from "../src/shared/api.js";
-import { descriptionKeyRule } from "../src/shared/rules.js";
+import type { BuilderDto, BuilderGroupDto, RecategorizeResponse, RulePreviewCounts, SaveRuleResponse, SuggestionsDto, TxnDto } from "../src/shared/api.js";
+import { descriptionKeyRule, ruleFor } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
 describe("fuzzy matching", () => {
@@ -150,4 +150,58 @@ describe("rules builder (sample backend)", async () => {
     await post("/reports/api/rules/preview", { definition: { schema: 2, when: { descriptionKey: { equals: "x" } }, then: {} } }, 400);
     await post("/reports/api/rules", { definition: descriptionKeyRule("x", { categoryId: "no-such-category" }), applyToPast: true }, 400);
   });
+
+  describe("one transaction, from the same sheet", () => {
+    it("offers the merchants a transaction missing a merchant looks like, and none for a complete one", async () => {
+      const txns = await get<TxnDto[]>("/reports/api/transactions");
+      const eats = txns.find((t) => t.accountId === "cap1" && t.description === "UBER *EATS")!;
+      expect(eats.merchantSource).toBe("none");
+      const s = await get<SuggestionsDto>(`/reports/api/transactions/${eats.id}/suggestions`);
+      expect(s.candidates[0]).toMatchObject({ merchant: "Uber Eats", confidence: 1 });
+      const plaid = txns.find((t) => t.merchant === "Blue Bottle Coffee")!;
+      expect(plaid.merchantSource).toBe("backend");
+      expect((await get<SuggestionsDto>(`/reports/api/transactions/${plaid.id}/suggestions`)).candidates).toEqual([]);
+    });
+
+    it("renames a merchant by hand, with a rule that renames the rest, written back and logged", async () => {
+      const txns = await get<TxnDto[]>("/reports/api/transactions");
+      const blue = txns.filter((t) => t.merchant === "Blue Bottle Coffee");
+      const source = blue[0]!;
+      const definition = ruleFor({ merchant: { equals: source.merchantKey } }, { merchant: "Blue Bottle" });
+      const res = await post<RecategorizeResponse>(`/reports/api/transactions/${source.id}/category`, {
+        merchant: "Blue Bottle",
+        rule: { definition, applyToPast: true },
+        uiContext: { surface: "recategorize-sheet" },
+      });
+      expect(res.txn).toMatchObject({ merchant: "Blue Bottle", merchantKey: "blue bottle", merchantSource: "manual", categoryId: source.categoryId, provenance: source.provenance });
+      expect(res.rule!.backfilled).toBe(blue.length - 1);
+      const after = await get<TxnDto[]>("/reports/api/transactions");
+      expect(after.filter((t) => t.merchant === "Blue Bottle Coffee")).toEqual([]);
+      expect(after.filter((t) => t.merchant === "Blue Bottle").length).toBeGreaterThanOrEqual(blue.length);
+
+      await sync.pushDirty();
+      const written = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM sample_backend_write WHERE merchant_name = 'Blue Bottle'");
+      expect(written.rows[0]!.n).toBeGreaterThanOrEqual(blue.length);
+      expect(await sync.run()).toMatchObject({ ruleChanges: 0, pushed: 0 });
+
+      const events = (await app.inject({ method: "GET", url: "/reports/api/decision-events.jsonl", headers: { host: "localhost" } })).body
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((e) => e.newMerchant === "Blue Bottle");
+      expect(events[0]).toMatchObject({ action: "rename", txnId: source.id, oldMerchant: "Blue Bottle Coffee", oldCategoryId: source.categoryId, newCategoryId: source.categoryId });
+      expect(events[1]).toMatchObject({ action: "rule_create" });
+      expect(events.filter((e) => e.action === "rule_backfill")).toHaveLength(blue.length - 1);
+    });
+
+    it("refuses a merchant for a transfer, and a request that changes nothing", async () => {
+      const txns = await get<TxnDto[]>("/reports/api/transactions");
+      const transfer = txns.find((t) => t.type === "transfer")!;
+      await post(`/reports/api/transactions/${transfer.id}/category`, { merchant: "Savings" }, 400);
+      await post(`/reports/api/transactions/${transfer.id}/category`, {}, 400);
+      const after = await get<TxnDto>(`/reports/api/transactions/${transfer.id}`);
+      expect(after.merchantSource).toBe("none");
+    });
+  });
+
 });

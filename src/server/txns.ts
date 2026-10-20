@@ -39,7 +39,7 @@ export interface TxnRow {
   deleted_at: Date | null;
   /** The merchant as the backend last reported it; null when it has none. */
   backend_merchant: string | null;
-  /** `backend` or `rule:<id>`. */
+  /** `backend`, `edited`, `manual` or `rule:<id>`. */
   merchant_provenance: string;
   merchant_dirty: boolean;
 }
@@ -67,6 +67,7 @@ export function toDto(row: TxnRow): TxnDto {
     tags: row.tags,
     categoryId: row.category_id,
     provenance: row.category_provenance,
+    merchantSource: row.merchant === null ? "none" : row.merchant_provenance,
   };
 }
 
@@ -84,11 +85,13 @@ export function backendSubject(row: TxnRow): RuleSubject {
 }
 
 /**
- * Whether a rule may set this transaction's merchant: the backend has none (or has only the
- * one a rule here wrote to it), and it is not a transfer, which has no merchant.
+ * Whether a rule may set this transaction's merchant. Never one a person set here, and never a
+ * transfer's, which has none. After a sync (`afterSync`), not one someone changed in the
+ * backend either; an explicit backfill, which a person asks for, may.
  */
-export function merchantFillable(row: TxnRow): boolean {
-  return row.type !== "transfer" && (row.backend_merchant === null || row.merchant_provenance.startsWith("rule:"));
+export function merchantSettable(row: TxnRow, afterSync: boolean): boolean {
+  if (row.type === "transfer" || row.merchant_provenance === "manual") return false;
+  return !(afterSync && row.merchant_provenance === "edited");
 }
 
 /**

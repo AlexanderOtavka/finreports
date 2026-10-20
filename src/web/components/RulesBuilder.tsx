@@ -4,7 +4,7 @@ import { api, isOffline } from "../api.js";
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatRange } from "../format.js";
 import { Amount, confidenceLabel } from "./builder-parts.js";
-import { RuleProposalSheet } from "./RuleProposalSheet.js";
+import { RuleSheet } from "./RuleSheet.js";
 
 interface Props {
   categories: CategoryTree;
@@ -20,6 +20,8 @@ const FILTERS: Array<{ id: Filter; label: string; count(g: BuilderGroupDto): num
   { id: "category", label: "No category", count: (g) => g.missingCategory },
   { id: "merchant", label: "No merchant", count: (g) => g.missingMerchant },
 ];
+
+const UI_CONTEXT = { surface: "rules-builder" };
 
 /** Groups drawn at first, and added with "Show more". */
 const PAGE = 30;
@@ -201,7 +203,7 @@ export function RulesBuilder({ categories, onSaved }: Props) {
         </section>
       )}
 
-      {open && <RuleProposalSheet group={open} categories={categories} onClose={closeSheet} onSaved={saved} />}
+      {open && <RuleSheet subject={{ kind: "group", group: open }} categories={categories} uiContext={UI_CONTEXT} onClose={closeSheet} onSaved={saved} />}
     </>
   );
 }
