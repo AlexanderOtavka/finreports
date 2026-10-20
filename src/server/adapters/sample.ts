@@ -1,13 +1,15 @@
 import type { Db } from "../db.js";
-import { generateSample, SAMPLE_ACCOUNTS, type SampleTxn } from "../sample/generate.js";
+import { generateImported, generateSample, SAMPLE_ACCOUNTS, type SampleTxn } from "../sample/generate.js";
 import { PLAID_TAXONOMY, primaryName } from "../../shared/taxonomy.js";
 import type { BackendAccount, BackendAdapter, BackendTxn, ChangeSet } from "./types.js";
 
 /**
  * The `sample` backend: the generated dataset of a car-free household, standing in for a
  * ledger. Like a Plaid-fed ledger, each transaction starts out with the category the importer
- * derived from Plaid's primary category. Category writes are kept in `sample_backend_write`,
- * so they survive restarts and come back on the next sync like a real backend's would.
+ * derived from Plaid's primary category, except the old card's CSV-imported history, which has
+ * neither a merchant nor a category. Category and merchant writes are kept in
+ * `sample_backend_write`, so they survive restarts and come back on the next sync like a real
+ * backend's would.
  */
 export interface SampleOptions {
   seed: number;
@@ -15,6 +17,12 @@ export interface SampleOptions {
   endDate?: string;
   /** Override the clock (tests). */
   now?: () => Date;
+}
+
+interface Write {
+  category_name: string | null;
+  merchant_name: string | null;
+  updated_at: Date;
 }
 
 interface Cursor {
@@ -40,8 +48,9 @@ export class SampleAdapter implements BackendAdapter {
     return this.options.endDate ?? this.now().toISOString().slice(0, 10);
   }
 
+  /** The imported history, then the Plaid year; oldest first. */
   dataset(): SampleTxn[] {
-    return generateSample(this.options.seed, this.endDate());
+    return [...generateImported(this.options.seed, this.endDate()), ...generateSample(this.options.seed, this.endDate())];
   }
 
   async listAccounts(): Promise<BackendAccount[]> {
@@ -59,8 +68,8 @@ export class SampleAdapter implements BackendAdapter {
     const cursor = cursorRaw ? (JSON.parse(cursorRaw) as Cursor) : null;
     const startedAt = this.now().toISOString();
     const data = this.dataset();
-    const writes = await this.db.query<{ external_id: string; category_name: string | null; updated_at: Date }>(
-      "SELECT external_id, category_name, updated_at FROM sample_backend_write",
+    const writes = await this.db.query<Write & { external_id: string }>(
+      "SELECT external_id, category_name, merchant_name, updated_at FROM sample_backend_write",
     );
     const written = new Map(writes.rows.map((w) => [w.external_id, w]));
     const changedIds = new Set(
@@ -89,9 +98,19 @@ export class SampleAdapter implements BackendAdapter {
     );
   }
 
-  private toBackend(t: SampleTxn, write?: { category_name: string | null; updated_at: Date }): BackendTxn {
-    const imported = primaryName(t.plaid.primary);
-    const category = write ? write.category_name : imported;
+  async setMerchant(externalId: string, merchant: string): Promise<void> {
+    await this.db.query(
+      `INSERT INTO sample_backend_write (external_id, merchant_name, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (external_id) DO UPDATE SET merchant_name = EXCLUDED.merchant_name, updated_at = now()`,
+      [externalId, merchant],
+    );
+  }
+
+  private toBackend(t: SampleTxn, write?: Write): BackendTxn {
+    // The category the importer derived from Plaid's; none for a CSV import.
+    const imported = t.plaid ? primaryName(t.plaid.primary) : null;
+    const category = write?.category_name ?? imported;
+    const merchant = write?.merchant_name ?? t.merchant;
     return {
       externalId: t.externalId,
       groupId: null,
@@ -100,18 +119,18 @@ export class SampleAdapter implements BackendAdapter {
       currency: "USD",
       type: t.type,
       pending: t.pending,
-      merchant: t.merchant,
+      merchant,
       description: t.description,
       accountId: t.accountId,
       accountName: t.accountName,
-      counterparty: t.counterparty,
+      counterparty: write?.merchant_name ?? t.counterparty,
       website: t.website,
       location: t.location,
       notes: t.notes,
       tags: t.tags,
       plaid: t.plaid,
       category,
-      categoryFromPlaid: category !== null && category === imported,
+      categoryFromPlaid: imported !== null && category === imported,
       updatedAt: write ? write.updated_at.toISOString() : `${t.date}T12:00:00.000Z`,
       replacesExternalId: t.replacesExternalId,
     };

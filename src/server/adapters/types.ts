@@ -10,7 +10,7 @@ export interface BackendAccount {
 }
 
 export interface BackendTxn {
-  /** Stable id of this transaction (split) in the backend; what `setCategory` takes. */
+  /** Stable id of this transaction (split) in the backend; what `setCategory` and `setMerchant` take. */
   externalId: string;
   groupId: string | null;
   /** ISO date (YYYY-MM-DD) the money moved, in the household's time zone. */
@@ -20,7 +20,7 @@ export interface BackendTxn {
   currency: string;
   type: "withdrawal" | "deposit" | "transfer";
   pending: boolean;
-  /** Cleaned merchant name, if the backend has one. */
+  /** Cleaned merchant name, if the backend has one (an imported statement often has none). */
   merchant: string | null;
   /** The description as the backend shows it (often the raw bank text). */
   description: string;
@@ -28,7 +28,7 @@ export interface BackendTxn {
   accountName: string | null;
   /** The other side: payee, payer, or the other account of a transfer. */
   counterparty: string | null;
-  /** Plaid's personal finance category, as SCREAMING_SNAKE primary/detailed. */
+  /** Plaid's personal finance category, as SCREAMING_SNAKE primary/detailed; null when not from Plaid. */
   plaid: { primary: string; detailed: string } | null;
   /** The merchant's website (`https://…`), if the backend knows it. */
   website?: string | null;
@@ -73,4 +73,9 @@ export interface BackendAdapter {
   listChanges(cursor: string | null, options: { full: boolean }): Promise<ChangeSet>;
   /** Sets the category of one transaction; the backend creates the category if needed. */
   setCategory(externalId: string, categoryName: string): Promise<void>;
+  /**
+   * Sets the merchant of one withdrawal or deposit: who was paid, or who paid. The backend
+   * then reports it as `merchant`.
+   */
+  setMerchant(externalId: string, merchant: string): Promise<void>;
 }

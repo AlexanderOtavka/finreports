@@ -1380,3 +1380,294 @@ a {
   background: #dd4b39;
   border-color: #d73925;
 }
+
+/* --- Rules builder: groups of transactions missing a merchant or a category --------------- */
+
+.builder {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.builder-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 400;
+}
+/* AdminLTE's "description-block"s, side by side. */
+.builder-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 0.25rem 0.25rem 0.5rem;
+}
+.builder-stats > div {
+  padding: 0 0.5rem;
+  text-align: center;
+  min-width: 0;
+}
+.builder-stats > div + div {
+  border-left: 1px solid var(--border-soft);
+}
+.builder-stats dt {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.builder-stats dd {
+  margin: 0;
+}
+.builder-stats dd:nth-of-type(1) {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.builder-stats dd.muted {
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+.builder-filters {
+  padding: 0.25rem 0.75rem 0.6rem;
+}
+.builder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.builder-list li + li .builder-group {
+  border-top: 1px solid var(--border-soft);
+}
+.builder-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+}
+.builder-group:hover {
+  background: var(--hover);
+}
+.builder-group-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+.builder-group-label {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.builder-group-total {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.builder-group-meta {
+  font-size: 0.85rem;
+  color: var(--text-3);
+}
+.builder-group-tags {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.1rem;
+}
+.builder-group-tags:empty {
+  display: none;
+}
+.prov-missing {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+.builder-match {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.3rem;
+  margin-top: 0.15rem;
+  font-size: 0.9rem;
+}
+.builder-arrow {
+  color: var(--accent);
+}
+/* Bootstrap's success/warning/default labels. */
+.confidence {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 0.25em;
+  padding: 0.2em 0.5em 0.25em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.confidence-high {
+  background: var(--inflow);
+}
+.confidence-medium {
+  background: var(--warning);
+}
+.confidence-low {
+  background: var(--label-default);
+  color: var(--label-default-ink);
+}
+/* --- The sheet's sections: what it looks like, merchant, category, rule ------------------ */
+
+.sheet-merchant-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet-descs {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+}
+.sheet-section-note {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.sheet-hint,
+.sheet-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-3);
+}
+.sheet-note {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.sheet-input {
+  margin: 0;
+}
+.link-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--link);
+  font-size: inherit;
+  cursor: pointer;
+}
+.browse-all {
+  padding-left: 0;
+}
+.mono,
+.builder-group-desc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+}
+.candidate:hover {
+  background: var(--hover);
+}
+.candidate.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--accent-soft);
+}
+.candidate-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.candidate-cat {
+  font-size: 0.88rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.candidate-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.82rem;
+}
+.candidate-evidence,
+.candidate-examples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+.candidate-examples {
+  border-top: 1px solid var(--border);
+  padding-top: 0.2rem;
+}
+.sheet-rule {
+  margin-top: 0.9rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-soft);
+}
+.sheet-rule .toggle-row .sheet-section {
+  margin: 0;
+}
+.match-options {
+  margin-top: 0.5rem;
+}
+.rule-summary {
+  margin: 0.5rem 0 0;
+  font-size: 0.92rem;
+}
+.rule-summary code {
+  font-size: 0.82rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.05rem 0.3rem;
+}
+.sheet-group-txns {
+  margin-top: 0.9rem;
+}
+.sheet-group-txns summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-2);
+  padding: 0.25rem 0;
+}
+.sheet-txns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.sheet-txns li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border-soft);
+}
+.sheet-txn-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sheet-txns .muted {
+  font-size: 0.78rem;
+}
+.sheet-error {
+  margin: 0;
+  font-size: 0.9rem;
+}

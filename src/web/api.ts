@@ -1,12 +1,15 @@
 import type {
   AccountDto,
+  BuilderDto,
   CategoryDto,
   RecategorizeRequest,
   RecategorizeResponse,
-  RulePreview,
+  RulePreviewCounts,
+  SaveRuleResponse,
   SessionDto,
   SuggestionsDto,
   TxnDto,
+  UiContext,
 } from "../shared/api.js";
 import type { RuleDefinition } from "../shared/rules.js";
 import type { Snapshot } from "./store.js";
@@ -136,8 +139,12 @@ export const api = {
   /** Every transaction; the reports run over them in the browser. */
   transactions: () => request<TxnDto[]>("GET", "/transactions"),
   suggestions: (txnId: number) => request<SuggestionsDto>("GET", `/transactions/${txnId}/suggestions`),
-  previewRule: (definition: RuleDefinition, excludeTxnId: number, signal?: AbortSignal) =>
-    request<RulePreview>("POST", "/rules/preview", { body: { definition, excludeTxnId }, signal }),
+  previewRule: (definition: RuleDefinition, excludeTxnId: number | undefined, signal?: AbortSignal) =>
+    request<RulePreviewCounts>("POST", "/rules/preview", { body: { definition, excludeTxnId }, signal }),
+  saveRule: (definition: RuleDefinition, applyToPast: boolean, uiContext: UiContext) =>
+    request<SaveRuleResponse>("POST", "/rules", { body: { definition, applyToPast, uiContext } }),
+  /** Transactions missing a merchant or a category, grouped, with the merchants to copy from. */
+  rulesBuilder: (signal?: AbortSignal) => request<BuilderDto>("GET", "/rules-builder", { signal }),
   recategorize: (txnId: number, body: RecategorizeRequest) =>
     request<RecategorizeResponse>("POST", `/transactions/${txnId}/category`, { body }),
   /** Ends the session on the server; a 401 means it already had. */

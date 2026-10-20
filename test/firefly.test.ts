@@ -223,6 +223,71 @@ describe("Firefly adapter", () => {
     });
   });
 
+  it("reads a Data Importer CSV import as no merchant, no category and nothing from Plaid", () => {
+    const adapter = new FireflyAdapter({ baseUrl: "http://firefly", token: "pat", initialSyncDays: 730 });
+    const csv = split({
+      transaction_journal_id: "201",
+      description: "TRADER JOE'S #558",
+      destination_id: "9",
+      destination_name: "(no name)",
+      category_id: null,
+      category_name: null,
+      tags: [],
+      notes: null,
+      external_url: null,
+      latitude: null,
+      longitude: null,
+      external_id: null,
+    });
+    expect(adapter.toBackend(group("21", "2025-06-01T10:00:00-04:00", [csv]), csv)).toMatchObject({
+      merchant: null,
+      counterparty: "(no name)",
+      plaid: null,
+      category: null,
+      categoryFromPlaid: false,
+    });
+  });
+
+  it("sets a withdrawal's merchant as its destination and a deposit's as its source, without Firefly's rules", async () => {
+    const { impl, calls } = mockFetch([
+      [
+        /GET .*\/api\/v1\/transaction-journals\/(201|202)$/,
+        () => ({
+          data: group("21", "2025-06-01T10:00:00-04:00", [
+            split({ transaction_journal_id: "201", destination_name: "(no name)" }),
+            split({ transaction_journal_id: "202", type: "deposit", source_name: "(no name)", destination_name: "Bilt Mastercard" }),
+          ]),
+        }),
+      ],
+      [/PUT .*\/api\/v1\/transactions\/21$/, () => ({ data: group("21", "2026-10-01T10:00:00-04:00", []) })],
+    ]);
+    const adapter = new FireflyAdapter({ baseUrl: "http://firefly", token: "pat", initialSyncDays: 730, fetch: impl, now: NOW });
+    await adapter.setMerchant("201", "Trader Joe's");
+    await adapter.setMerchant("202", "Trader Joe's");
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts.map((c) => c.body)).toEqual([
+      {
+        apply_rules: false,
+        fire_webhooks: true,
+        transactions: [{ transaction_journal_id: "201", destination_name: "Trader Joe's" }, { transaction_journal_id: "202" }],
+      },
+      {
+        apply_rules: false,
+        fire_webhooks: true,
+        transactions: [{ transaction_journal_id: "201" }, { transaction_journal_id: "202", source_name: "Trader Joe's" }],
+      },
+    ]);
+  });
+
+  it("refuses to give a transfer a merchant", async () => {
+    const { impl, calls } = mockFetch([
+      [/GET .*\/api\/v1\/transaction-journals\/301$/, () => ({ data: group("31", "2026-09-01T10:00:00-04:00", [split({ transaction_journal_id: "301", type: "transfer" })]) })],
+    ]);
+    const adapter = new FireflyAdapter({ baseUrl: "http://firefly", token: "pat", initialSyncDays: 730, fetch: impl, now: NOW });
+    await expect(adapter.setMerchant("301", "Savings")).rejects.toThrow(/transfer, which has no merchant/);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
   it("reports HTTP errors without echoing the response body", async () => {
     const { impl } = mockFetch([[/GET/, () => new Response("secret transaction details", { status: 500 })]]);
     const adapter = new FireflyAdapter({ baseUrl: "http://firefly", token: "pat", initialSyncDays: 730, fetch: impl, now: NOW });

@@ -13,6 +13,11 @@
  * Plaid's categories are attached as Plaid would: mostly right, and consistently wrong for
  * some merchants (Uber Eats as rideshare, Citi Bike as rideshare, a cat clinic as a doctor,
  * a laundromat as "other shopping"), which is what makes recategorizing worth doing.
+ *
+ * Before that year, the history of an old card comes from its bank's CSV statements, imported
+ * the way a ledger's CSV importer does (`generateImported`): only the raw description, written
+ * the way that bank writes it, with no merchant, no category and nothing from Plaid. That is
+ * what the rules builder fills in.
  */
 
 export interface SampleAccount {
@@ -26,6 +31,8 @@ export const SAMPLE_ACCOUNTS: SampleAccount[] = [
   { id: "sav", name: "High-Yield Savings ••9021", type: "savings" },
   { id: "jordan", name: "Jordan Rewards Visa ••3308", type: "credit" },
   { id: "sam", name: "Sam Cash Back Mastercard ••7725", type: "credit" },
+  // The old card, closed before the bank was connected to Plaid: its history is CSV imports.
+  { id: "cap1", name: "Capital One Card ••0442", type: "credit" },
 ];
 
 const accountName = (id: string): string => SAMPLE_ACCOUNTS.find((a) => a.id === id)!.name;
@@ -41,7 +48,8 @@ export interface SampleTxn {
   accountId: string;
   accountName: string;
   counterparty: string | null;
-  plaid: { primary: string; detailed: string };
+  /** Null for an imported statement's transactions: Plaid never saw them. */
+  plaid: { primary: string; detailed: string } | null;
   /** What a careful person would call it; differs from `plaid` for mis-categorizations. */
   truth: { primary: string; detailed: string };
   replacesExternalId: string | null;
@@ -51,7 +59,12 @@ export interface SampleTxn {
   /** Notes and tags someone added in the ledger. */
   notes: string | null;
   tags: string[];
+  /** From an imported CSV statement, rather than through Plaid. */
+  imported?: boolean;
 }
+
+/** A Plaid transaction: the twelve months `generateSample` makes. */
+export type PlaidSampleTxn = SampleTxn & { plaid: NonNullable<SampleTxn["plaid"]> };
 
 // ---------------------------------------------------------------------------------------
 // Randomness
@@ -789,9 +802,9 @@ function slug(value: string): string {
 }
 
 /** Transactions dated `iso`, as of `endDate` (the last day of data; later days are pending). */
-export function generateDay(seed: number, iso: string, endDate: string): SampleTxn[] {
+export function generateDay(seed: number, iso: string, endDate: string): PlaidSampleTxn[] {
   const day = toDay(iso);
-  const out: SampleTxn[] = [];
+  const out: PlaidSampleTxn[] = [];
   const counts = new Map<string, number>();
   generators.forEach((gen, g) => {
     // One stream per generator, so adding a generator never reshuffles the others.
@@ -830,8 +843,88 @@ export function generateDay(seed: number, iso: string, endDate: string): SampleT
 }
 
 /** Twelve months of transactions ending on `endDate` (inclusive), oldest first. */
-export function generateSample(seed: number, endDate: string, days = 365): SampleTxn[] {
-  const out: SampleTxn[] = [];
+export function generateSample(seed: number, endDate: string, days = 365): PlaidSampleTxn[] {
+  const out: PlaidSampleTxn[] = [];
   for (let i = days - 1; i >= 0; i -= 1) out.push(...generateDay(seed, addDays(endDate, -i), endDate));
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------
+// The old card's imported statements
+
+/** Days of CSV statement history before the Plaid year. */
+export const IMPORTED_DAYS = 90;
+
+/**
+ * The description as the old card's bank writes it in its CSV statements: the same merchants as
+ * Plaid's raw descriptions, but not always the same text (no padding, apostrophes, a full
+ * name where the other bank abbreviates, references dropped).
+ */
+const STATEMENT_STYLE: Array<[RegExp, string]> = [
+  [/^TRADER JOE S #(\d+).*$/, "TRADER JOE'S #$1"],
+  [/^WHOLEFDS BRK (\d+)$/, "WHOLE FOODS BRK #$1"],
+  [/^UBER \*TRIP .*$/, "UBER *TRIP"],
+  [/^UBER \*EATS .*$/, "UBER *EATS"],
+  [/^AMZN Mktp US\*(\w+)/, "AMAZON.COM*$1"],
+  [/^BLUE BOTTLE COFFEE BRKLYN$/, "BLUE BOTTLE COFFEE"],
+  [/^NETFLIX\.COM$/, "NETFLIX.COM NETFLIX.COM CA"],
+];
+
+export function statementDescription(raw: string): string {
+  let value = raw.replace(/\s+/g, " ").trim();
+  for (const [re, to] of STATEMENT_STYLE) value = value.replace(re, to);
+  return value;
+}
+
+/** Shops from before the Plaid year, which no Plaid transaction names. */
+const FORMER_SHOPS: Array<{ desc: string; chance: number; min: number; max: number; truth: Cat }> = [
+  { desc: "KEY FOOD #1123 BROOKLYN NY", chance: 0.18, min: 22, max: 88, truth: C.groceries },
+  { desc: "MCNALLY JACKSON BOOKS", chance: 0.03, min: 14, max: 48, truth: C.news },
+  { desc: "TST* HOMETOWN BAR-B-QUE", chance: 0.02, min: 40, max: 95, truth: C.restaurant },
+];
+
+/**
+ * The old card's history: the `IMPORTED_DAYS` before the Plaid year that ends on `endDate`, as a
+ * CSV import leaves it. The household's card spending of those days (the same generators as
+ * the Plaid year) and a few shops they no longer go to, each with only the statement's
+ * description: no merchant, no category, nothing from Plaid.
+ */
+export function generateImported(seed: number, endDate: string, plaidDays = 365): SampleTxn[] {
+  const first = addDays(endDate, -(plaidDays - 1));
+  const out: SampleTxn[] = [];
+  for (let i = IMPORTED_DAYS; i >= 1; i -= 1) {
+    const iso = addDays(first, -i);
+    const card = generateDay(seed, iso, endDate).filter((t) => (t.accountId === "jordan" || t.accountId === "sam") && t.type !== "transfer");
+    const rng = prng(hashString(`${seed}|${iso}|imported`));
+    const former = FORMER_SHOPS.filter((shop) => chance(rng, shop.chance)).map((shop) => ({
+      description: shop.desc,
+      amount: -cents(between(rng, shop.min, shop.max)),
+      truth: { primary: shop.truth[0], detailed: shop.truth[1] },
+    }));
+    const rows = [...card, ...former];
+    rows.forEach((t, n) => {
+      const description = statementDescription(t.description);
+      out.push({
+        externalId: `cap1:${iso}:${n + 1}`,
+        date: iso,
+        amount: t.amount,
+        type: t.amount < 0 ? "withdrawal" : "deposit",
+        pending: false,
+        merchant: null,
+        description,
+        accountId: "cap1",
+        accountName: accountName("cap1"),
+        counterparty: null,
+        plaid: null,
+        truth: t.truth,
+        replacesExternalId: null,
+        website: null,
+        location: null,
+        notes: null,
+        tags: [],
+        imported: true,
+      });
+    });
+  }
   return out;
 }

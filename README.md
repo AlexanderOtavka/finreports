@@ -29,6 +29,18 @@ search for a card shows its refunds next to its charges. In a transaction, the m
 name searches the list for that merchant, in place, and "Look up" searches the web for it (DuckDuckGo), for the merchants nobody recognizes. Plaid's
 website and location for the merchant, and the ledger's notes and tags, are shown there too.
 
+The **Rules** tab fills in what imported history lacks. A bank's CSV statement, imported
+into the ledger, has only a raw description: no merchant and no category, so neither the
+reports nor the merchant rules can place it. The tab lists the transactions missing a merchant,
+a category, or both, grouped by description (`TRADER JOE'S #558` and `#561` are one group),
+with how many, how much and when, and how many are grouped and how many are left over. Each
+group comes with the merchants it looks like: merchants whose transactions have both a
+merchant and a category, and whose own (Plaid) descriptions resemble the group's, with a
+confidence and the evidence (their descriptions, a few of their transactions). Tap a group for
+its proposed rule, in the same sheet a transaction opens: the description → that merchant and
+that category, both editable, with what it would change. Saved, it fills in the past transactions and every new one that matches,
+and writes the merchant and the category back to the ledger.
+
 Every report counts all accounts until you check only some of them (the button by the date
 range), to see one credit card's spending or leave one out. The choice is kept in the URL
 (`accounts=…`) and sticks through report tabs, ranges, drill-downs and the back button; only
@@ -75,13 +87,16 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   the transactions. `firefly` uses Firefly III's REST API (never its tables); `sample` serves a
   generated dataset. Writing a new backend means implementing `BackendAdapter`
   (`adapters/types.ts`): list accounts and categories, list transactions changed since a
-  cursor, set a transaction's category.
+  cursor, set a transaction's category, and set its merchant (Firefly's payee: the
+  destination account of a withdrawal, the source of a deposit).
 - **Database** (`migrations/`, plain SQL, applied at startup):
   - `txn`: normalized mirror of the backend's transactions, one row per split, with the
     category's **provenance**: `plaid` (the importer's guess from Plaid), `backend` (someone
     or something in the ledger chose it), `rule:<id>`, `manual`, or `none`. Also the
     merchant's website and location (the Plaid connector writes Plaid's into Firefly's
-    external URL and latitude/longitude), and the ledger's notes and tags.
+    external URL and latitude/longitude), and the ledger's notes and tags. The merchant has a
+    provenance too: the backend's (`backend_merchant`, null when it has none, as for a CSV
+    import's "(no name)" payee) or one a rule filled in (`rule:<id>`).
   - `category`: the tree (two levels), seeded from Plaid's primary/detailed taxonomy. Firefly's
     categories are flat, so the tree lives here; top-level names are the names the Plaid
     connector writes, so Firefly's categories map back by name.
@@ -91,7 +106,7 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
     spending, for the server's own queries (the reports compute the same in the browser).
 - **Sync loop** (`src/server/sync.ts`): every `SYNC_INTERVAL_SECONDS`, pull changes through
   the adapter into `txn`, run the rules over new and changed transactions, and write locally
-  decided categories back through the adapter. A failed write stays queued (`backend_dirty`)
+  decided merchants and categories back through the adapter. A failed write stays queued (`backend_dirty`)
   and is retried. A full listing every `FULL_SYNC_INTERVAL_HOURS` notices deletions.
 - **Web app** (`src/web/`): Vite + React + ECharts, built into `dist/web` and served by the
   same Fastify server under `/reports/`. It loads every transaction once (`/api/transactions`,
@@ -114,29 +129,54 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
 
 ## Categories, rules and provenance
 
-- Tapping a transaction opens the recategorize sheet: suggestions first (what this merchant's
-  other transactions are filed under, Plaid's own guess, and recently chosen categories), then
-  the whole tree, searchable. Saving makes the category `manual`.
-- "Always categorize *Merchant* as X" creates a merchant rule
-  (`{"when": {"merchant": {"equals": "<merchant key>"}}, "then": {"categoryId": "…"}}`). The
-  sheet previews how many past transactions it would change and, if asked, applies it to them
-  (`rule_backfill`). Toggling it again for the same merchant edits that rule (a new version).
+- Tapping a transaction opens its sheet (`src/web/components/RuleSheet.tsx`), the same one a
+  rules builder group opens, top to bottom: the merchants it looks like (only when it is
+  missing a merchant or a category), the merchant's name (rename it), the category
+  (suggestions: what this merchant's other transactions are filed under, Plaid's own guess,
+  recently chosen categories; then search, or browse the whole tree), and "Do this for every
+  transaction like it". Saving makes what you changed `manual`.
+- "Do this for every transaction like it" creates a rule for the same merchant
+  (`{"when": {"merchant": {"equals": "<merchant key>"}}, "then": {"categoryId": "…"}}`) or the
+  same description (`descriptionKey`, below) that sets the category and, if you renamed it, the
+  merchant. The sheet says what the rule does, previews how many past transactions it would
+  change and, if asked, applies it to them (`rule_backfill`). The same predicate again edits
+  that rule (a new version).
 - The merchant key is the backend's cleaned merchant name, or the raw description stripped of
   processor prefixes, store numbers and city (`src/shared/merchant.ts`), so that
   `SQ *SUDS WASH AND FOLD 8832 BROOKLYN NY` and `… 1041 …` are one merchant.
 - Rules never change a `manual` category. After a sync they also leave `backend` categories
   alone; an explicit backfill, which a person asks for, does not. The newest matching rule wins.
 - Rules are data, so richer predicates are added in `src/shared/rules.ts` (schema + evaluator):
-  v1 has `merchant`, `description`, `account` (`equals`/`contains`), `amount` (`min`/`max`),
-  and `all`/`any`/`not`.
+  `merchant`, `description`, `descriptionKey`, `account` (`equals`/`contains`), `amount`
+  (`min`/`max`), and `all`/`any`/`not`. Schema 1 rules set a category
+  (`"then": {"categoryId": …}`); schema 2 rules set a category, a merchant, or both
+  (`"then": {"merchant": "Trader Joe's", "categoryId": …}`).
+- The rules builder's rules are schema 2:
+  `{"schema": 2, "when": {"descriptionKey": {"equals": "trader joes"}}, "then": {"merchant": "Trader Joe's", "categoryId": "food-and-drink.groceries"}}`.
+  A description key is the cleaned description without the words that carry a number (store
+  numbers, references), so the grouping and the rule agree, and it does not depend on the
+  merchant, so the rule still matches once it has filled the merchant in.
+- Merchants have provenance like categories: the backend's import (`backend`), changed in the
+  backend afterwards (`edited`), `manual`, or `rule:<id>`. Rules never change a `manual`
+  merchant, nor a transfer's (it has none); after a sync they also leave `edited` ones alone,
+  and an explicit backfill does not. A rule that sets a merchant matches the transaction as the
+  backend has it, so renaming it does not change what the rule matches.
+- Merchants come first: the newest matching rule that sets a merchant sets it, then the newest
+  matching rule that sets a category (looking at the merchant just set) sets that, so "Trader
+  Joe's → Groceries" also reaches the imported Trader Joe's statements once a rule has named
+  them. A merchant set here is written back to the backend (`merchant_dirty`, retried like a
+  category); one later changed in the backend is that person's choice (`edited`).
 
 ## The decision log
 
-Every manual recategorization and every rule create/update/delete/backfill appends one
-`decision_event` row: timestamp, actor (the Firefly login email), action, a full snapshot of
-the transaction as it was (merchant, description, amount, account, date, Plaid categories,
-prior category and its provenance), old → new category and provenance, the rule definition and
-version if any, and the UI context (report, drill path, date range). Export it as JSON lines:
+Every manual recategorization or rename and every rule create/update/delete/backfill appends
+one `decision_event` row: timestamp, actor (the Firefly login email), action, a full snapshot
+of the transaction as it was (merchant, description, amount, account, date, Plaid categories,
+prior category and its provenance), old → new category and provenance, old → new merchant
+when someone renamed it (action `rename`, when that was all) or a rule that sets one is
+involved, the rule definition and version if any, and the UI context (report, drill path, date
+range, or the surface, `rules-builder`). Events written since merchants can be set say
+`schemaVersion: 2`. Export it as JSON lines:
 
 ```bash
 curl -b "REPORTSSESSION=…" https://firefly.example.com/reports/api/decision-events.jsonl
@@ -261,7 +301,9 @@ Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categoriz
 exported `decision_event` rows and their snapshot → the monthly report → a month → a
 merchant → its transaction's website, location and "Look up" → tap the merchant's name: the
 list searches for it, with the drill path and range kept, then a year of it → dark mode → only some accounts
-(kept through tabs, ranges, links and the back button) → log out (the copy on the device
+(kept through tabs, ranges, links and the back button) → the Rules tab: the counts, the
+Trader Joe's statements' group and its match, its proposed rule, saved (the group is gone,
+the count drops), and a group with nothing to copy from → log out (the copy on the device
 is gone) and back in. Any console
 error, page error, failed request, or HTTP error fails it. Screenshots of every step land in
 `smoke-output/<viewport>/` (gitignored): look at them. Besides `phone` and `desktop`, the
@@ -281,7 +323,10 @@ bank descriptions. Each day comes from its own seeded PRNG, so moving the end da
 or drops days. Plaid's categories are attached with realistic, consistent mistakes (Uber Eats
 and Citi Bike as rideshare, the cat clinic as a doctor, the laundromat as shopping, Venmo
 dinners as transfers): about one transaction in four, most of them small, frequent ones (deli
-runs, bike rides) that one merchant rule fixes.
+runs, bike rides) that one merchant rule fixes. Before that year, 90 days of an old card's
+history come from its CSV statements, as a ledger's CSV import leaves them (`generateImported`):
+the same merchants, described the way that bank writes them, with no merchant, no category and
+nothing from Plaid, and a few shops the household no longer goes to.
 
 ## Image and CI
 

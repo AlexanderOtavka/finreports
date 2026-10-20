@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addDays, generateDay, generateSample } from "../src/server/sample/generate.js";
-import { merchantKey } from "../src/shared/merchant.js";
+import { addDays, generateDay, generateImported, generateSample, IMPORTED_DAYS, statementDescription } from "../src/server/sample/generate.js";
+import { descriptionKey, merchantKey } from "../src/shared/merchant.js";
 
 const END = "2026-09-30";
 
@@ -60,5 +60,39 @@ describe("sample dataset", () => {
     const laundry = data.filter((t) => t.description.startsWith("SQ *SUDS"));
     expect(laundry.length).toBeGreaterThan(30);
     expect(new Set(laundry.map((t) => merchantKey(t.merchant, t.description)))).toEqual(new Set(["suds wash and fold"]));
+  });
+
+  describe("the old card's imported statements", () => {
+    const imported = generateImported(235, END);
+
+    it("are the days before the Plaid year, deterministic, with ids of their own", () => {
+      expect(generateImported(235, END)).toEqual(imported);
+      expect(imported[0]!.date).toBe(addDays(data[0]!.date, -IMPORTED_DAYS));
+      expect(imported[imported.length - 1]!.date).toBe(addDays(data[0]!.date, -1));
+      expect(imported.length).toBeGreaterThan(IMPORTED_DAYS * 4);
+      const ids = new Set([...imported, ...data].map((t) => t.externalId));
+      expect(ids.size).toBe(imported.length + data.length);
+    });
+
+    it("have only the statement's description: no merchant, no Plaid, nothing else", () => {
+      for (const t of imported) {
+        expect(t).toMatchObject({ imported: true, accountId: "cap1", merchant: null, counterparty: null, plaid: null, pending: false, website: null, location: null, notes: null, tags: [] });
+        expect(t.type).not.toBe("transfer");
+      }
+    });
+
+    it("describe the same merchants as Plaid does, not always in the same words", () => {
+      expect(statementDescription("TRADER JOE S #558 BROOKLYN NY")).toBe("TRADER JOE'S #558");
+      expect(statementDescription("UBER   *EATS K3J9Z2Q1")).toBe("UBER *EATS");
+      expect(statementDescription("SQ *ROBERTAS PIZZA")).toBe("SQ *ROBERTAS PIZZA");
+      const keys = new Set(imported.map((t) => descriptionKey(t.description)));
+      const plaidKeys = new Set(data.map((t) => descriptionKey(t.description)));
+      const shared = [...keys].filter((k) => plaidKeys.has(k));
+      expect(shared.length).toBeGreaterThan(20);
+      // And some that only the old statements have.
+      expect(keys).toContain("key food");
+      expect(plaidKeys).not.toContain("key food");
+      expect(plaidKeys).not.toContain("trader joes");
+    });
   });
 });
