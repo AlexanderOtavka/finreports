@@ -41,10 +41,37 @@ export async function loadActiveRules(db: Queryable): Promise<ActiveRule[]> {
   return out;
 }
 
+/**
+ * The active rules, newest first, with how many transactions each has set the category or the
+ * merchant of (and still has: a person or a newer rule may have changed them since).
+ */
 export async function listRules(db: Queryable): Promise<RuleDto[]> {
-  const res = await db.query<{ id: number; version: number; definition: unknown; created_at: Date; updated_at: Date }>(
-    `SELECT r.id, v.version, v.definition, r.created_at, r.updated_at
+  const res = await db.query<{
+    id: number;
+    version: number;
+    definition: unknown;
+    created_at: Date;
+    updated_at: Date;
+    applied: number;
+    categorized: number;
+    named: number;
+  }>(
+    `WITH hits AS (
+       SELECT id, category_provenance AS provenance, 'category' AS what FROM txn
+       WHERE deleted_at IS NULL AND category_provenance LIKE 'rule:%'
+       UNION ALL
+       SELECT id, merchant_provenance, 'merchant' FROM txn
+       WHERE deleted_at IS NULL AND merchant_provenance LIKE 'rule:%' AND merchant IS NOT NULL
+     ), counts AS (
+       SELECT substr(provenance, 6)::int AS rule_id, count(DISTINCT id)::int AS applied,
+         count(*) FILTER (WHERE what = 'category')::int AS categorized,
+         count(*) FILTER (WHERE what = 'merchant')::int AS named
+       FROM hits GROUP BY 1
+     )
+     SELECT r.id, v.version, v.definition, r.created_at, r.updated_at,
+       coalesce(c.applied, 0) AS applied, coalesce(c.categorized, 0) AS categorized, coalesce(c.named, 0) AS named
      FROM rule r JOIN rule_version v ON v.rule_id = r.id AND v.version = r.current_version
+     LEFT JOIN counts c ON c.rule_id = r.id
      WHERE r.deleted_at IS NULL ORDER BY r.id DESC`,
   );
   return res.rows.map((r) => ({
@@ -53,7 +80,23 @@ export async function listRules(db: Queryable): Promise<RuleDto[]> {
     definition: r.definition,
     createdAt: r.created_at.toISOString(),
     updatedAt: r.updated_at.toISOString(),
+    applied: r.applied,
+    categorized: r.categorized,
+    named: r.named,
   }));
+}
+
+/** The transactions an active rule has set the category or the merchant of, newest first. */
+export async function ruleTransactions(db: Queryable, ruleId: number): Promise<TxnRow[]> {
+  const rule = await db.query("SELECT 1 FROM rule WHERE id = $1 AND deleted_at IS NULL", [ruleId]);
+  if (!rule.rows[0]) throw new HttpError(404, "no such rule");
+  const res = await db.query<TxnRow>(
+    `SELECT * FROM txn
+     WHERE deleted_at IS NULL AND (category_provenance = $1 OR (merchant_provenance = $1 AND merchant IS NOT NULL))
+     ORDER BY date DESC, id DESC`,
+    [`rule:${ruleId}`],
+  );
+  return res.rows;
 }
 
 /**

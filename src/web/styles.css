@@ -779,14 +779,16 @@ a {
   color: var(--text-2);
   font-weight: 700;
 }
-.txn-list mark {
+.txn-list mark,
+.builder-list mark {
   background: #fde68a;
   color: inherit;
   border-radius: 2px;
   box-shadow: 0 0 0 1px #fde68a;
 }
 @media (prefers-color-scheme: dark) {
-  .txn-list mark {
+  .txn-list mark,
+  .builder-list mark {
     background: #7a5d12;
     box-shadow: 0 0 0 1px #7a5d12;
     color: #fff4cc;
@@ -1427,6 +1429,91 @@ a {
 .builder-filters {
   padding: 0.25rem 0.75rem 0.6rem;
 }
+/* The filters, the date range's button group, in one line under the tabs, held there while
+   the page scrolls under them. */
+.rules-filters {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg);
+}
+.rules-filters .chip-count {
+  margin-left: 0.3em;
+}
+/* On a phone, a little smaller, so all four fit with the search. */
+@media (max-width: 480px) {
+  .rules-filters .chip {
+    padding: 0.35rem 0.55rem;
+    font-size: 0.8rem;
+  }
+}
+.rules-search-open {
+  margin: 0 -0.25rem 0 auto;
+}
+.chip-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.rules-section {
+  margin: 0 0.75rem 0.9rem;
+}
+.rules-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rules-section-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.rules-section-head .muted {
+  font-size: 0.8rem;
+  text-align: right;
+}
+.rules-search {
+  padding: 0.5rem 0.75rem;
+}
+.builder-group.saving {
+  opacity: 0.7;
+}
+/* A new rule on its way from its group to the rules. */
+.builder-group.flight-ghost {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  transform-origin: top left;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+}
+.landed {
+  animation: landed 1.2s ease-out;
+}
+@keyframes landed {
+  from {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+}
+.bump {
+  animation: bump 0.36s ease-out;
+}
+@keyframes bump {
+  50% {
+    transform: scale(1.12);
+  }
+}
 .builder-list {
   list-style: none;
   margin: 0;
@@ -1666,6 +1753,17 @@ a {
 }
 .sheet-txns .muted {
   font-size: 0.78rem;
+}
+.sheet-applied {
+  margin-top: 0.9rem;
+}
+.sheet-txn-head {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn-danger {
+  color: var(--outflow);
 }
 .sheet-error {
   margin: 0;

@@ -212,13 +212,8 @@ export function buildGroups(rows: TxnRow[]): BuilderDto {
       txns: list.slice(0, BUILDER_TXN_LIMIT).map(toBuilderTxn),
     };
   });
-  groups.sort(
-    (a, b) =>
-      Number(b.size > 1) - Number(a.size > 1) ||
-      b.size - a.size ||
-      Math.abs(b.total) - Math.abs(a.total) ||
-      (a.key < b.key ? -1 : 1),
-  );
+  // The most money first, in or out: where a rule is worth the most.
+  groups.sort((a, b) => Math.abs(b.total) - Math.abs(a.total) || b.size - a.size || (a.key < b.key ? -1 : 1));
 
   const multi = groups.filter((g) => g.size > 1);
   return {

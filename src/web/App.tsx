@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OTHER_KEY } from "../reports/category-drilldown.js";
 import { findReport, REPORTS } from "../reports/index.js";
 import { inScope, runReport, selection, toReportTxn } from "../reports/run.js";
 import type { RangePreset } from "../reports/types.js";
-import type { AccountDto, RecategorizeRequest, TxnDto } from "../shared/api.js";
+import type { AccountDto, RecategorizeRequest, TxnDto, UiContext } from "../shared/api.js";
 import { merchantKey } from "../shared/merchant.js";
-import { evaluate, ruleActions, ruleDefinitionSchema } from "../shared/rules.js";
+import { ruleDefinitionSchema, type RuleDefinition } from "../shared/rules.js";
 import { api, ApiError, isOffline, login, type ReportQuery } from "./api.js";
 import { CategoryTree } from "./categories.js";
 import { AccountFilter } from "./components/AccountFilter.js";
@@ -13,9 +13,11 @@ import { Chart } from "./components/Chart.js";
 import { RuleSheet } from "./components/RuleSheet.js";
 import { RulesBuilder } from "./components/RulesBuilder.js";
 import { TxnList } from "./components/TxnList.js";
+import { applyRule, fillGroups, upsertRule, useLedger, type Change, type LedgerState } from "./ledger.js";
 import { formatMoneyShort, formatRange, formatSyncTime, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
 import { clearSnapshot, loadSnapshot, saveSnapshot, type Snapshot } from "./store.js";
 import { useUpdateReady } from "./sw-client.js";
+import { ruleTitle } from "./rules-text.js";
 import { chartTheme, useDarkMode } from "./theme.js";
 
 // ---------------------------------------------------------------------------------------
@@ -127,8 +129,7 @@ export function App() {
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
   const [view, setView] = useState<ViewState>(readUrl);
-  /** Every transaction, null until they arrive. The chart and the list are computed from them. */
-  const [txns, setTxns] = useState<TxnDto[] | null>(null);
+  const [builderError, setBuilderError] = useState<string | null>(null);
   /** When the data on screen came from the server, and how it stands now. */
   const [sync, setSync] = useState<{ state: SyncState; fetchedAt: number | null }>({ state: "updating", fetchedAt: null });
   const [openTxn, setOpenTxn] = useState<TxnDto | null>(null);
@@ -146,6 +147,22 @@ export function App() {
   const report = findReport(view.reportId) ?? REPORTS[0]!;
   const onBuilder = view.reportId === BUILDER;
 
+  // --- Changes: shown at once, saved in the background, undone if the server refuses -------
+
+  const settledTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revalidate = useRef<() => void>(() => undefined);
+  const ledger = useLedger(
+    (label, err) => setToast({ id: Date.now(), text: `Not saved, undone: ${label} (${err.message})`, error: true }),
+    () => {
+      // Once the queue is empty, and stays so a moment, the server's own answers.
+      if (settledTimer.current) clearTimeout(settledTimer.current);
+      settledTimer.current = setTimeout(() => revalidate.current(), 800);
+    },
+  );
+  const { commit, tempId, resolved, keyOf, receive, stamp, busy, server } = ledger;
+  /** Every transaction, null until they arrive. The chart and the list are computed from them. */
+  const txns = ledger.state.txns;
+
   // --- Data: the copy kept on this device at once, then the server's ----------------------
 
   const show = useCallback((snap: Snapshot) => {
@@ -153,7 +170,6 @@ export function App() {
     setAccounts(snap.accounts);
     setSession(snap.session);
     setCategories(new CategoryTree(snap.categories));
-    setTxns(snap.txns);
   }, []);
 
   /** Resolves once the kept copy is on screen, or known not to exist. */
@@ -170,9 +186,12 @@ export function App() {
     refreshing.current = true;
     setSync((s) => ({ ...s, state: "updating" }));
     try {
+      const since = stamp();
       const { session: { csrfToken: _, ...s }, ...data } = await api.snapshot();
       fetchedAt.current = Date.now();
       show({ ...data, session: s, fetchedAt: fetchedAt.current });
+      // A change the server took meanwhile is not in these; the refresh after it will be.
+      receive({ txns: data.txns }, since);
       setSync({ state: "fresh", fetchedAt: fetchedAt.current });
     } catch (err) {
       // Nothing to show without the server: log in, or say what went wrong.
@@ -186,7 +205,7 @@ export function App() {
     } finally {
       refreshing.current = false;
     }
-  }, [show]);
+  }, [show, stamp, receive]);
 
   useEffect(() => {
     kept.current = loadSnapshot()
@@ -195,6 +214,7 @@ export function App() {
         // The server may have answered first.
         if (!snap || fetchedAt.current) return snap;
         show(snap);
+        receive({ txns: snap.txns });
         savedTxns.current = snap.txns; // already kept
         setSync((s) => (s.fetchedAt ? s : { ...s, fetchedAt: snap.fetchedAt }));
         return snap;
@@ -212,14 +232,42 @@ export function App() {
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [show, refresh]);
+  }, [show, refresh, receive]);
 
-  // Keep what is on screen for next time: after a refresh, and after a change saved here.
+  // Keep the server's data for next time: after a refresh, and after a change it took.
+  const serverTxns = ledger.confirmed.txns;
   useEffect(() => {
-    if (loggedOutRef.current || !txns || !categories || !session || !sync.fetchedAt || sync.state === "updating" || txns === savedTxns.current) return;
-    savedTxns.current = txns;
-    saveSnapshot({ session, categories: categories.all, categoryOrder, accounts, txns, fetchedAt: sync.fetchedAt }).catch(() => undefined);
-  }, [txns, categories, session, categoryOrder, accounts, sync]);
+    const kept = serverTxns;
+    if (loggedOutRef.current || !kept || !categories || !session || !sync.fetchedAt || sync.state === "updating" || kept === savedTxns.current) return;
+    savedTxns.current = kept;
+    saveSnapshot({ session, categories: categories.all, categoryOrder, accounts, txns: kept, fetchedAt: sync.fetchedAt }).catch(() => undefined);
+  }, [serverTxns, categories, session, categoryOrder, accounts, sync]);
+
+  // The rules tab's data: loaded the first time it opens, kept, and refreshed quietly after.
+  const loadRules = useCallback(() => {
+    const since = stamp();
+    setBuilderError(null);
+    Promise.all([api.rulesBuilder(), api.rules()])
+      .then(([builder, rules]) => {
+        if (!receive({ builder, rules }, since) && !server().builder) loadRules();
+      })
+      .catch((err: Error) => {
+        if (!server().builder) setBuilderError(isOffline(err) ? "The rules need the server, and you're offline." : err.message);
+      });
+  }, [stamp, receive, server]);
+  useEffect(() => {
+    if (onBuilder && !busy()) loadRules();
+  }, [onBuilder, busy, loadRules]);
+
+  revalidate.current = () => {
+    if (busy() || loggedOutRef.current) return;
+    const since = stamp();
+    const withRules = server().builder !== null;
+    Promise.all([api.transactions(), withRules ? api.rulesBuilder() : null, withRules ? api.rules() : null])
+      .then(([fresh, builder, rules]) => receive({ txns: fresh, ...(builder && rules ? { builder, rules } : {}) }, since))
+      // The next refresh tries again.
+      .catch(() => undefined);
+  };
 
   const currentView = useRef(view);
   currentView.current = view;
@@ -259,7 +307,13 @@ export function App() {
 
   // The chart and the list, from scratch on every change of the view (report, range, accounts,
   // drill path) or of the transactions: no request, and nothing kept from the last view.
-  const reportTxns = useMemo(() => (txns && categories ? txns.map((t) => toReportTxn(t, categories.byId)) : null), [txns, categories]);
+  // Behind the change that is shown at once: a new chart may take a moment, without holding up
+  // the screen.
+  const reportSource = useDeferredValue(txns);
+  const reportTxns = useMemo(
+    () => (reportSource && categories ? reportSource.map((t) => toReportTxn(t, categories.byId)) : null),
+    [reportSource, categories],
+  );
   const { data, listTxns } = useMemo(() => {
     if (!reportTxns) return { data: null, listTxns: [] };
     const scoped = inScope(report, reportTxns, view);
@@ -310,78 +364,127 @@ export function App() {
     [report.id, view],
   );
 
-  const onSave = useCallback(
-    async (req: RecategorizeRequest) => {
-      const txn = openTxn;
-      if (!txn || !categories || !txns) return;
-      setOpenTxn(null);
-      // Optimistic: the chart and the list show the change at once, and, with a rule applied to
-      // the past, a guess at the transactions it reaches (not ones set by hand).
-      const before = txns;
-      const touched = new Set<number>([txn.id]);
-      const rule = req.rule?.applyToPast ? ruleDefinitionSchema.safeParse(req.rule.definition) : null;
-      const ruleThen = rule?.success ? ruleActions(rule.data) : null;
-      setTxns((list) =>
-        list!.map((t) => {
-          if (t.id === txn.id) {
-            return {
-              ...t,
-              ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
-              ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
-            };
-          }
-          if (rule?.success && ruleThen && evaluate(rule.data.when, { merchant: t.merchantSource === "none" ? null : t.merchant, description: t.description, accountName: t.accountName, amount: t.amount })) {
-            const next = { ...t };
-            if (ruleThen.categoryId && t.provenance !== "manual") Object.assign(next, { categoryId: ruleThen.categoryId, provenance: "rule:new" });
-            if (ruleThen.merchant && t.merchantSource !== "manual" && t.type !== "transfer") {
-              Object.assign(next, { merchant: ruleThen.merchant, merchantKey: merchantKey(ruleThen.merchant, t.description), merchantSource: "rule:new" });
-            }
-            if (next.categoryId !== t.categoryId || next.merchant !== t.merchant) touched.add(t.id);
-            return next;
-          }
-          return t;
-        }),
-      );
-      setFlash(touched);
-      try {
-        const res = await api.recategorize(txn.id, req);
-        const what = [req.merchant, req.categoryId ? categories.name(req.categoryId) : null].filter(Boolean).join(", ");
-        const extra = res.rule
-          ? res.rule.backfilled > 0
-            ? `rule saved, ${res.rule.backfilled} past ${res.rule.backfilled === 1 ? "transaction" : "transactions"} updated`
-            : "rule saved"
-          : "";
-        setToast({ id: Date.now(), text: [what ? `${txn.merchant} → ${what}` : txn.merchant, extra].filter(Boolean).join(" · ") });
-        // The server's word on the transaction; with a rule or a new merchant (which the rules
-        // may categorize), on all of them. The optimistic list stays until then.
-        setTxns((list) => list!.map((t) => (t.id === res.txn.id ? res.txn : t)));
-        if (res.rule || req.merchant) {
-          api
-            .transactions()
-            .then(setTxns)
-            .catch((err: Error) => setToast({ id: Date.now(), text: err.message, error: true }));
-        }
-      } catch (err) {
-        setTxns(before);
-        setToast({ id: Date.now(), text: `Not saved: ${(err as Error).message}`, error: true });
-      } finally {
-        setTimeout(() => setFlash(new Set()), 1600);
-      }
+  /** Shows a change and queues it; returns the transactions it changes, for the list to flash. */
+  const change = useCallback(
+    (c: Change): Set<number> => {
+      const before = ledger.state;
+      const after = c.apply(before, (id) => id);
+      const touched = new Set<number>();
+      if (before.txns && after.txns && before.txns !== after.txns) after.txns.forEach((t, i) => t !== before.txns![i] && touched.add(t.id));
+      commit(c);
+      return touched;
     },
-    [openTxn, categories, txns],
+    [ledger.state, commit],
+  );
+
+  /** A rule saved, with the past changed if asked: the rule list, the transactions, the groups. */
+  const withRule = (s: LedgerState, id: number, definition: RuleDefinition, past: boolean): LedgerState => ({
+    rules: s.rules ? upsertRule(s.rules, id, definition) : s.rules,
+    txns: past && s.txns ? applyRule(s.txns, id, definition) : s.txns,
+    builder: past && s.builder ? fillGroups(s.builder, definition) : s.builder,
+  });
+
+  const flashFor = (touched: Set<number>) => {
+    setFlash(touched);
+    setTimeout(() => setFlash(new Set()), 1600);
+  };
+
+  const onSave = useCallback(
+    (req: RecategorizeRequest) => {
+      const txn = openTxn;
+      if (!txn || !categories) return;
+      setOpenTxn(null);
+      const parsed = req.rule ? ruleDefinitionSchema.safeParse(req.rule.definition) : null;
+      const rule = parsed?.success ? { temp: tempId(), definition: parsed.data, past: req.rule!.applyToPast } : null;
+      const edit = (t: TxnDto): TxnDto => ({
+        ...t,
+        ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
+        ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
+      });
+      const apply = (s: LedgerState, idOf: (id: number) => number): LedgerState => {
+        const next = rule ? withRule(s, idOf(rule.temp), rule.definition, rule.past) : s;
+        // The transaction itself is as it was, with what was set by hand.
+        const own = s.txns?.find((t) => t.id === txn.id);
+        return { ...next, txns: next.txns && own ? next.txns.map((t) => (t.id === txn.id ? edit(own) : t)) : next.txns };
+      };
+      const what = [req.merchant, req.categoryId ? categories.name(req.categoryId) : null].filter(Boolean).join(", ");
+      const touched = change({
+        label: txn.merchant,
+        apply,
+        async send(idOf) {
+          const res = await api.recategorize(txn.id, req);
+          if (rule && res.rule) resolved(rule.temp, res.rule.id);
+          return (s, ids) => {
+            const next = apply(s, ids);
+            return { ...next, txns: next.txns?.map((t) => (t.id === res.txn.id ? res.txn : t)) ?? null };
+          };
+        },
+      });
+      touched.add(txn.id);
+      flashFor(touched);
+      const others = touched.size - 1;
+      setToast({
+        id: Date.now(),
+        text: [what ? `${txn.merchant} → ${what}` : txn.merchant, rule ? (others > 0 ? `rule saved, ${others} more updated` : "rule saved") : ""].filter(Boolean).join(" · "),
+      });
+    },
+    // withRule and flashFor only use setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openTxn, categories, change, tempId, resolved],
   );
 
   const closeSheet = useCallback(() => setOpenTxn(null), []);
 
-  // A rule from the rules builder changed merchants and categories on the server: say what,
-  // and bring the transactions (the reports' and the copy on this device) up to date.
-  const onRuleSaved = useCallback((text: string) => {
-    setToast({ id: Date.now(), text });
-    api
-      .transactions()
-      .then(setTxns)
-      .catch((err: Error) => setToast({ id: Date.now(), text: err.message, error: true }));
-  }, []);
+  // From the rules tab: make a rule, change one, delete one.
+  const createRule = useCallback(
+    (definition: RuleDefinition, past: boolean, uiContext: UiContext): number => {
+      const temp = tempId();
+      const same = JSON.stringify(definition.when);
+      const existing = ledger.state.rules?.find((r) => JSON.stringify((r.definition as RuleDefinition | null)?.when) === same);
+      const name = ruleTitle(definition);
+      const touched = change({
+        label: `rule for ${name}`,
+        apply: (s, idOf) => withRule(s, idOf(temp), definition, past),
+        async send() {
+          const res = await api.saveRule(definition, past, uiContext);
+          resolved(temp, res.id);
+        },
+      });
+      setToast({ id: Date.now(), text: `Rule saved: ${name}${touched.size > 0 ? ` · ${touched.size} updated` : ""}` });
+      return existing ? keyOf(existing.id) : temp;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ledger.state.rules, change, tempId, resolved, keyOf],
+  );
+
+  const updateRule = useCallback(
+    (id: number, definition: RuleDefinition, past: boolean, uiContext: UiContext) => {
+      const name = ruleTitle(definition);
+      const touched = change({
+        label: `rule for ${name}`,
+        apply: (s, idOf) => withRule(s, idOf(id), definition, past),
+        send: async (idOf) => void (await api.updateRule(idOf(id), definition, past, uiContext)),
+      });
+      setToast({ id: Date.now(), text: `Rule saved: ${name}${touched.size > 0 ? ` · ${touched.size} updated` : ""}` });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [change],
+  );
+
+  const deleteRule = useCallback(
+    (id: number) => {
+      const found = ledger.state.rules?.find((r) => r.id === id);
+      const parsed = found ? ruleDefinitionSchema.safeParse(found.definition) : null;
+      const name = parsed?.success ? ruleTitle(parsed.data) : `#${id}`;
+      change({
+        label: `deleting the rule for ${name}`,
+        apply: (s, idOf) => ({ ...s, rules: s.rules?.filter((r) => r.id !== idOf(id)) ?? null }),
+        send: async (idOf) => void (await api.deleteRule(idOf(id))),
+      });
+      setToast({ id: Date.now(), text: `Rule deleted: ${name}` });
+    },
+    [ledger.state.rules, change],
+  );
 
   // Log out: the server's session ends, and the copy of the data on this device goes, even when
   // the server is out of reach (its session then ends on its own once idle).
@@ -395,9 +498,9 @@ export function App() {
     }
     await clearSnapshot().catch(() => undefined);
     setOpenTxn(null);
-    setTxns(null);
+    receive({ txns: null, rules: null, builder: null });
     setLoggedOut({ serverEnded });
-  }, []);
+  }, [receive]);
 
   // The merchant's name in the sheet: that merchant's transactions within the current range
   // and drill path, which stay as they are, chart and all.
@@ -554,7 +657,24 @@ export function App() {
 
       <div className="page">
       {onBuilder ? (
-        <div className="builder">{categories ? <RulesBuilder categories={categories} onSaved={onRuleSaved} /> : <p className="empty">Loading…</p>}</div>
+        <div className="builder">
+          {categories ? (
+            <RulesBuilder
+              categories={categories}
+              txns={txns}
+              rules={ledger.state.rules}
+              builder={ledger.state.builder}
+              error={builderError}
+              onRetry={loadRules}
+              keyOf={keyOf}
+              onCreate={createRule}
+              onUpdate={updateRule}
+              onDelete={deleteRule}
+            />
+          ) : (
+            <p className="empty">Loading…</p>
+          )}
+        </div>
       ) : (
       <>
       <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)}>

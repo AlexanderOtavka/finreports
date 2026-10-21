@@ -2,7 +2,8 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { TxnDto } from "../../shared/api.js";
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney } from "../format.js";
-import { highlightParts, parseQuery, TxnSearch } from "../search.js";
+import { parseQuery, TxnSearch } from "../search.js";
+import { Hl, SearchIcon } from "./search-parts.js";
 
 interface Props {
   /** Every transaction in the selection, newest first. */
@@ -25,25 +26,6 @@ function provenanceLabel(p: string): { text: string; title: string } | null {
   if (p.startsWith("rule:")) return { text: "Rule", title: `Categorized by rule #${p.slice(5)}` };
   if (p === "backend") return { text: "Ledger", title: "Categorized in the ledger" };
   return null; // Plaid's guess: the default, unmarked
-}
-
-/** `text` with the parts that match a search term marked. */
-function Hl({ text, terms }: { text: string; terms: string[] }) {
-  if (terms.length === 0) return <>{text}</>;
-  return (
-    <>
-      {highlightParts(text, terms).map((p, i) => (p.match ? <mark key={i}>{p.text}</mark> : p.text))}
-    </>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-      <circle cx="6.75" cy="6.75" r="4.75" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M10.3 10.3 14.5 14.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
 }
 
 /** In cents, so that adding up thousands of amounts stays exact. */

@@ -4,6 +4,7 @@ import type {
   CategoryDto,
   RecategorizeRequest,
   RecategorizeResponse,
+  RuleDto,
   RulePreviewCounts,
   SaveRuleResponse,
   SessionDto,
@@ -143,6 +144,14 @@ export const api = {
     request<RulePreviewCounts>("POST", "/rules/preview", { body: { definition, excludeTxnId }, signal }),
   saveRule: (definition: RuleDefinition, applyToPast: boolean, uiContext: UiContext) =>
     request<SaveRuleResponse>("POST", "/rules", { body: { definition, applyToPast, uiContext } }),
+  /** A new version of a rule: what it sets, and with `applyToPast`, set it now. */
+  updateRule: (id: number, definition: RuleDefinition, applyToPast: boolean, uiContext: UiContext) =>
+    request<SaveRuleResponse>("PUT", `/rules/${id}`, { body: { definition, applyToPast, uiContext } }),
+  deleteRule: (id: number) => request<{ ok: boolean }>("DELETE", `/rules/${id}`),
+  /** The active rules, newest first, with what each has done. */
+  rules: (signal?: AbortSignal) => request<RuleDto[]>("GET", "/rules", { signal }),
+  /** The transactions a rule has set the category or the merchant of. */
+  ruleTransactions: (id: number, signal?: AbortSignal) => request<TxnDto[]>("GET", `/rules/${id}/transactions`, { signal }),
   /** Transactions missing a merchant or a category, grouped, with the merchants to copy from. */
   rulesBuilder: (signal?: AbortSignal) => request<BuilderDto>("GET", "/rules-builder", { signal }),
   recategorize: (txnId: number, body: RecategorizeRequest) =>

@@ -107,6 +107,10 @@ export interface RuleDto {
   definition: unknown;
   createdAt: string;
   updatedAt: string;
+  /** Transactions the rule has set the category or the merchant of, and of them, which. */
+  applied: number;
+  categorized: number;
+  named: number;
 }
 
 /** A link to another app, shown in the top bar (`NAV_LINKS`). */
@@ -218,7 +222,7 @@ export interface BuilderDto {
     /** Transactions in groups with at least one candidate. */
     withCandidate: number;
   };
-  /** Groups of two or more first (biggest first), then the single transactions. */
+  /** The most money first (the total's absolute value), single transactions among them. */
   groups: BuilderGroupDto[];
 }
 
