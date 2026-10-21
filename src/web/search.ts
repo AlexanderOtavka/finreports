@@ -1,5 +1,5 @@
 /**
- * Transaction search, all in the browser: the query is split into terms (spaces separate
+ * Search, all in the browser, for the transactions and for the rules page: the query is split into terms (spaces separate
  * them; "double quotes" keep a phrase together), and a transaction matches when every term is
  * found in at least one of its fields: merchant, raw description, category, account, amount,
  * date (in every way it is commonly written), notes, tags, website, payee. Matching ignores
@@ -55,15 +55,15 @@ const WEEKDAY = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "U
 const LONG = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 /** The date as people type it: 2026-09-14, 9/14/2026, Sep 14, September 14, 2026, Monday. */
-function dateForms(iso: string): string[] {
+export function dateForms(iso: string): string[] {
   const d = new Date(`${iso}T00:00:00Z`);
   const [y, m, day] = iso.split("-");
   return [iso, `${Number(m)}/${Number(day)}/${y}`, `${m}/${day}/${y}`, formatDate(iso), LONG.format(d), WEEKDAY.format(d)];
 }
 
-function amountForms(t: TxnDto): string[] {
-  const abs = Math.abs(t.amount);
-  return [formatMoney(abs), abs.toFixed(2), t.amount.toFixed(2)];
+export function amountForms(amount: number): string[] {
+  const abs = Math.abs(amount);
+  return [formatMoney(abs), abs.toFixed(2), amount.toFixed(2)];
 }
 
 /** A field the list does not show, worth showing when a term is found only there. */
@@ -72,20 +72,70 @@ export interface HiddenField {
   value: string;
 }
 
-interface Indexed {
-  txn: TxnDto;
+/** What of an item a search looks at: what its row shows, and what it does not. */
+export interface Searchable {
+  shown: string[];
+  hidden: HiddenField[];
+}
+
+interface Indexed<T> {
+  item: T;
   /** Everything searchable, folded, one field per line. */
   haystack: string;
   hidden: HiddenField[];
 }
 
-export class TxnSearch {
-  private readonly index: Indexed[];
-  private readonly byId = new Map<number, Indexed>();
+/** A search over any list, as the transactions' works. */
+export class Search<T> {
+  private readonly index: Indexed<T>[];
+  private readonly byItem = new Map<T, Indexed<T>>();
 
+  constructor(items: T[], describe: (item: T) => Searchable) {
+    this.index = items.map((item) => {
+      const { shown, hidden: all } = describe(item);
+      const hidden = all.filter((f) => f.value);
+      const entry = { item, haystack: fold([...shown, ...hidden.map((f) => f.value)].join("\n")), hidden };
+      this.byItem.set(item, entry);
+      return entry;
+    });
+  }
+
+  get size(): number {
+    return this.index.length;
+  }
+
+  /** The items with every term, in list order. */
+  filter(terms: string[]): T[] {
+    if (terms.length === 0) return this.index.map((x) => x.item);
+    return this.index.filter((x) => terms.every((term) => has(x.haystack, term))).map((x) => x.item);
+  }
+
+  /**
+   * The hidden fields that hold a term the visible ones lack, so the list can show why an item
+   * matched.
+   */
+  hiddenMatches(item: T, terms: string[], visible: string[]): HiddenField[] {
+    const entry = this.byItem.get(item);
+    if (!entry) return [];
+    const seen = fold(visible.join("\n"));
+    const missing = terms.filter((term) => !has(seen, term));
+    return entry.hidden.filter((f) => missing.some((term) => has(fold(f.value), term)));
+  }
+}
+
+export class TxnSearch extends Search<TxnDto> {
   constructor(txns: TxnDto[], categories: CategoryTree) {
-    this.index = txns.map((t) => {
-      const hidden: HiddenField[] = [
+    super(txns, (t) => ({
+      shown: [
+        t.merchant,
+        categories.name(t.categoryId),
+        categories.parentName(t.categoryId) ?? "",
+        ...dateForms(t.date),
+        ...amountForms(t.amount),
+        t.pending ? "pending" : "",
+        t.type,
+      ],
+      hidden: [
         { label: "Description", value: t.description },
         { label: "Account", value: t.accountName ?? "" },
         { label: "Payee", value: t.counterparty ?? "" },
@@ -93,38 +143,8 @@ export class TxnSearch {
         { label: "Tags", value: t.tags.join(", ") },
         { label: "Website", value: t.website?.replace(/^https?:\/\/(www\.)?/, "") ?? "" },
         { label: "Plaid", value: t.plaidDetailed?.toLowerCase().replaceAll("_", " ") ?? "" },
-      ].filter((f) => f.value);
-      const shown = [
-        t.merchant,
-        categories.name(t.categoryId),
-        categories.parentName(t.categoryId) ?? "",
-        ...dateForms(t.date),
-        ...amountForms(t),
-        t.pending ? "pending" : "",
-        t.type,
-      ];
-      const entry = { txn: t, haystack: fold([...shown, ...hidden.map((f) => f.value)].join("\n")), hidden };
-      this.byId.set(t.id, entry);
-      return entry;
-    });
-  }
-
-  /** The transactions with every term, in list order. */
-  filter(terms: string[]): TxnDto[] {
-    if (terms.length === 0) return this.index.map((x) => x.txn);
-    return this.index.filter((x) => terms.every((term) => has(x.haystack, term))).map((x) => x.txn);
-  }
-
-  /**
-   * The hidden fields that hold a term the visible ones (merchant, category, date, amount)
-   * lack, so the list can show why a transaction matched.
-   */
-  hiddenMatches(txn: TxnDto, terms: string[], visible: string[]): HiddenField[] {
-    const entry = this.byId.get(txn.id);
-    if (!entry) return [];
-    const seen = fold(visible.join("\n"));
-    const missing = terms.filter((term) => !has(seen, term));
-    return entry.hidden.filter((f) => missing.some((term) => has(fold(f.value), term)));
+      ],
+    }));
   }
 }
 

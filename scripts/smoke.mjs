@@ -196,7 +196,10 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
   // Likewise the 401s while the session is made to look over, and the 503s while the server is.
   let signedOut = false;
   let serverDown = false;
+  // And the 500 while the server is made to refuse a change.
+  let refusing = false;
   const disconnected = (text) =>
+    (refusing && /status of 500 \(Internal Server Error\)/.test(text)) ||
     (offline && /ERR_INTERNET_DISCONNECTED/.test(text)) ||
     (signedOut && /status of 401 \(Unauthorized\)/.test(text)) ||
     (serverDown && /status of 503 \(Service Unavailable\)/.test(text));
@@ -215,7 +218,7 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
       if (error !== "net::ERR_ABORTED" && !disconnected(error)) problems.push(`request failed: ${req.url()} ${error}`);
     });
     page.on("response", (res) => {
-      if (res.status() >= 400 && !(signedOut && res.status() === 401) && !(serverDown && res.status() === 503)) problems.push(`HTTP ${res.status()}: ${res.url()}`);
+      if (res.status() >= 400 && !(signedOut && res.status() === 401) && !(serverDown && res.status() === 503) && !(refusing && res.status() === 500)) problems.push(`HTTP ${res.status()}: ${res.url()}`);
     });
     let step = 0;
     const shot = async (label, { fullPage = false } = {}) => {
@@ -450,10 +453,15 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await page.getByTestId("save").click();
     await page.getByTestId("toast").waitFor();
     const toast = await page.getByTestId("toast").innerText();
-    assert(toast.includes(`${previewCount} past`), `toast reports the backfill (${toast})`);
+    assert(toast.includes(`${previewCount} more updated`), `toast reports the backfill (${toast})`);
     await page.waitForFunction(() => ![...document.querySelectorAll("[data-testid=txn]")].some((el) => el.textContent?.includes("Uber Eats")));
-    const taxisAfter = await reportData(page, server.base, "spending-by-category", { ...r, path: ["transportation"] });
-    const taxisValueAfter = taxisAfter.rows.find((x) => x.key === "transportation.taxis-and-ride-shares").value;
+    // The screen changes before the server has; the server catches up behind it.
+    let taxisValueAfter = taxisValueBefore;
+    for (let i = 0; i < 50 && taxisValueAfter >= taxisValueBefore - 100; i += 1) {
+      if (i > 0) await page.waitForTimeout(100);
+      const taxisAfter = await reportData(page, server.base, "spending-by-category", { ...r, path: ["transportation"] });
+      taxisValueAfter = taxisAfter.rows.find((x) => x.key === "transportation.taxis-and-ride-shares").value;
+    }
     assert(taxisValueAfter < taxisValueBefore - 100, `taxis shrank (${taxisValueBefore} → ${taxisValueAfter})`);
     await page.waitForFunction(() => !document.querySelector('[data-testid=ranked-row][data-key="uber eats"]'));
     await shot("after-save");
@@ -629,8 +637,11 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     assert(urlParams().r === "rules-builder" && !urlParams().range, `the builder is in the URL (${page.url()})`);
     const deficientBefore = Number((await page.getByTestId("builder-deficient").innerText()).replace(/,/g, ""));
     assert(deficientBefore > 500, `the builder counts what is missing (${deficientBefore})`);
-    assert((await page.locator(".range-bar").count()) === 0, "no range bar in the builder");
+    assert((await page.getByTestId("range-30d").count()) === 0, "no date range in the builder");
     await shot("builder");
+    // "All" shows the three biggest, above the rules; the rest are a tap away.
+    assert((await page.getByTestId("builder-group").count()) === 3, "All shows the top three");
+    await page.getByTestId("builder-more").click();
     const tj = page.locator('[data-testid=builder-group][data-key="trader joes"]');
     await tj.scrollIntoViewIfNeeded();
     assert((await tj.getByTestId("builder-match").innerText()).includes("Trader Joe's"), "the group matches Trader Joe's");
@@ -643,10 +654,13 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     assert(proposalCount > 5, `the rule would change the group (${proposalCount})`);
     await shot("builder-proposal");
     await page.getByTestId("save").click();
-    await page.getByTestId("sheet").waitFor({ state: "detached" });
+    // At once: the sheet closes, the group flies down to the rules, the toast says what it did.
+    await page.getByTestId("sheet").waitFor({ state: "detached", timeout: 500 });
+    await page.waitForTimeout(40);
+    await shot("builder-flight");
     await page.getByTestId("toast").waitFor();
     const builderToast = await page.getByTestId("toast").innerText();
-    assert(builderToast.includes(`${proposalCount} transactions updated`), `the toast says what the rule did (${builderToast})`);
+    assert(builderToast.includes(`${proposalCount} updated`), `the toast says what the rule did (${builderToast})`);
     await page.waitForFunction(() => !document.querySelector('[data-testid=builder-group][data-key="trader joes"]'));
     const deficientAfter = Number((await page.getByTestId("builder-deficient").innerText()).replace(/,/g, ""));
     assert(deficientAfter === deficientBefore - proposalCount, `the count drops by the group (${deficientBefore} → ${deficientAfter})`);
@@ -657,6 +671,65 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await shot("builder-no-match");
     await page.keyboard.press("Escape");
     await page.getByTestId("sheet").waitFor({ state: "detached" });
+    // 12c. The rules: the one just made, with the transactions it set; change its category.
+    await page.getByTestId("rules-list").scrollIntoViewIfNeeded();
+    await shot("rules-below");
+    // Search looks through both: what needs a rule and the rules, as the transactions' does.
+    await page.getByTestId("rules-search-open").click();
+    await page.getByTestId("rules-search").fill("coffee");
+    await page.waitForFunction(() => document.querySelector("[data-testid=rules-search-status]")?.dataset.query === "coffee");
+    const coffeeGroups = await page.getByTestId("builder-group").count();
+    assert(coffeeGroups > 0, `search finds groups (${coffeeGroups})`);
+    assert((await page.locator("[data-testid=builder-groups] mark").count()) > 0, "search highlights what matched");
+    await shot("rules-search");
+    // A description only a rule's transactions have: found through them, and said so.
+    await page.getByTestId("rules-search").fill('"trader joe\'s #558"');
+    await page.locator("[data-testid=rule-item]").first().waitFor();
+    assert((await page.getByTestId("rules-search-rules").innerText()) === "1", "the rule is found by what it applied to");
+    assert((await page.getByTestId("rules-hit").first().innerText()).includes("Applied to"), "and the row says why");
+    await page.getByTestId("rules-search-close").click();
+    await page.getByTestId("builder-filter-rules").click();
+    await page.getByTestId("rules-list").waitFor();
+    assert((await page.getByTestId("builder-group").count()) === 0, "the Rules filter shows only the rules");
+    await page.getByTestId("rules-search-open").click();
+    await page.getByTestId("rules-search").fill("trader");
+    const tjRule = page.getByTestId("rule-item").first();
+    const appliedText = await tjRule.getByTestId("rule-applied").innerText();
+    assert(appliedText === `${proposalCount}`, `the rule counts what it set (${appliedText})`);
+    await shot("rules");
+    await tjRule.click();
+    await page.locator("[data-testid=sheet][data-kind=rule]").waitFor();
+    await page.getByTestId("applied-txn").first().waitFor();
+    const appliedRows = await page.getByTestId("applied-txn").count();
+    assert(appliedRows === proposalCount, `the sheet lists what the rule set (${appliedRows})`);
+    assert((await page.getByTestId("save").isDisabled()), "nothing to save before a change");
+    await shot("rule-sheet");
+    await page.getByTestId("category-search").fill("restaurant");
+    await page.locator('.tree [data-category-id="food-and-drink.restaurant"]').click();
+    await page.getByTestId("preview-count").waitFor();
+    assert(Number(await page.getByTestId("preview-count").innerText()) === proposalCount, "the edit would recategorize what the rule set");
+    await page.getByTestId("save").click();
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
+    // At once, before the server has answered.
+    await page.waitForFunction(() => document.querySelector("[data-testid=rule-item]")?.textContent?.includes("Restaurant"), null, { timeout: 500 });
+    await shot("rules-after");
+    // And it sticks once the server's answers are back.
+    await page.waitForTimeout(2500);
+    assert((await page.getByTestId("rule-item").first().innerText()).includes("Restaurant"), "the edit sticks after the refresh");
+    assert((await page.getByTestId("rule-item").first().getByTestId("rule-applied").innerText()) === `${proposalCount}`, "the count sticks too");
+    // A change the server refuses is undone: delete the rule with the server failing.
+    refusing = true;
+    await page.route("**/reports/api/rules/*", (route) => (route.request().method() === "DELETE" ? route.fulfill({ status: 500, body: '{"error":"boom"}' }) : route.continue()));
+    await page.getByTestId("rule-item").first().click();
+    await page.getByTestId("delete-rule").click();
+    await page.getByTestId("delete-rule").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=toast]")?.textContent?.includes("undone"), null, { timeout: 5000 });
+    assert((await page.getByTestId("rule-item").count()) === 1, "the refused delete is undone");
+    await shot("rules-undone");
+    await page.unroute("**/reports/api/rules/*");
+    refusing = false;
+    await page.getByTestId("rules-search-close").click();
+    await page.getByTestId("builder-filter-all").click();
     // Back to the reports.
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();

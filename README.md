@@ -166,6 +166,25 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   Joe's → Groceries" also reaches the imported Trader Joe's statements once a rule has named
   them. A merchant set here is written back to the backend (`merchant_dirty`, retried like a
   category); one later changed in the backend is that person's choice (`edited`).
+- The Rules tab is one page: what still needs a rule (the rules builder's groups) on top, and
+  the rules there are below, newest first (`GET /api/rules`), each with what it matches, what
+  it sets, and how many transactions have their merchant or category from it now. One row of
+  filters, held under the tabs: All, No merchant, No category, Rules, and a search that works
+  like the transactions' (terms, "quoted phrases", highlights) over both lists at once: a
+  group's descriptions, accounts and look-alike merchants, a rule's match, what it sets, and
+  the descriptions of the transactions it has set. Tapping a rule opens the
+  same sheet: change the merchant and the category it sets (`PUT /api/rules/:id`, a new
+  version, with a preview and an optional backfill), see the transactions it has set, or delete
+  it (what it set stays). Its match stays as it is. A rule made from a group flies down into
+  the rules. `GET /api/rules/:id/transactions` lists what a rule has set, for other clients;
+  the app works that out from the transactions it already has.
+- Changes are shown at once and saved behind the screen (`src/web/ledger.ts`): the app keeps
+  what the server last said and the changes still on their way, and shows the one with the
+  other on top. The changes go to the server one at a time, in order (a rule made a moment ago
+  gets a temporary id until the server numbers it). One the server refuses is dropped, which
+  undoes it on screen, with a message. Once the queue is empty, a quiet refresh swaps what the
+  app guessed (which transactions a rule reaches, which groups it fills) for the server's own
+  answers.
 
 ## The decision log
 

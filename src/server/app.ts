@@ -17,7 +17,7 @@ import type { Config } from "./config.js";
 import { appRoot, inTransaction, type Db } from "./db.js";
 import { exportJsonl } from "./decisions.js";
 import { HttpError } from "./errors.js";
-import { backfillCandidates, deleteRule, listRules, parseDefinition, saveRule } from "./rules.js";
+import { backfillCandidates, deleteRule, listRules, parseDefinition, ruleTransactions, saveRule } from "./rules.js";
 import type { SyncService } from "./sync.js";
 import { toDto, type TxnRow } from "./txns.js";
 
@@ -171,6 +171,11 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
   });
 
   app.get(`${BASE}/api/rules`, async () => listRules(db));
+
+  // What a rule has done: the transactions whose category or merchant it set.
+  app.get<{ Params: { id: string } }>(`${BASE}/api/rules/:id/transactions`, async (req) =>
+    (await ruleTransactions(db, Number(req.params.id) || 0)).map(toDto),
+  );
 
   app.post(`${BASE}/api/rules/preview`, async (req) => {
     const body = parse(previewBody, req.body);

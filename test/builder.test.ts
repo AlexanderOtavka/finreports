@@ -4,7 +4,7 @@ import { buildApp } from "../src/server/app.js";
 import { dice, nameScore, trigrams } from "../src/server/builder.js";
 import { DEV_AUTH_BYPASS_VALUE, loadConfig } from "../src/server/config.js";
 import { SyncService } from "../src/server/sync.js";
-import type { BuilderDto, BuilderGroupDto, RecategorizeResponse, RulePreviewCounts, SaveRuleResponse, SuggestionsDto, TxnDto } from "../src/shared/api.js";
+import type { BuilderDto, BuilderGroupDto, RecategorizeResponse, RuleDto, RulePreviewCounts, SaveRuleResponse, SuggestionsDto, TxnDto } from "../src/shared/api.js";
 import { descriptionKeyRule, ruleFor } from "../src/shared/rules.js";
 import { freshDb, silentLog } from "./helpers.js";
 
@@ -64,9 +64,9 @@ describe("rules builder (sample backend)", async () => {
     expect(t.groups).toBe(before.groups.filter((g) => g.size > 1).length);
     expect(t.withCandidate).toBeGreaterThan(t.missingCategory / 2);
     expect(t.withCandidate).toBeLessThan(t.deficient);
-    // Groups first, biggest first; then the ones on their own.
-    const sizes = before.groups.map((g) => g.size);
-    expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+    // The most money first, in or out.
+    const amounts = before.groups.map((g) => Math.abs(g.total));
+    expect(amounts).toEqual([...amounts].sort((a, b) => b - a));
     // No transfers.
     expect(before.groups.some((g) => /PAYMENT TO|TRANSFER TO/.test(g.descriptions[0]!.description))).toBe(false);
   });
@@ -144,6 +144,39 @@ describe("rules builder (sample backend)", async () => {
     await sync.run();
     const row = await db.query("SELECT merchant, category_id FROM txn WHERE external_id = 'late-import'");
     expect(row.rows[0]).toEqual({ merchant: "Trader Joe's", category_id: "food-and-drink.groceries" });
+  });
+
+  it("lists the rules with what each has set, and the transactions it has set", async () => {
+    const rules = await get<RuleDto[]>("/reports/api/rules");
+    const tj = rules.find((r) => JSON.stringify(r.definition).includes("trader joes"))!;
+    // The builder's group and the statement line imported later.
+    const size = group(before, "trader joes")!.size + 1;
+    expect(tj).toMatchObject({ applied: size, named: size, categorized: size });
+    const txns = await get<TxnDto[]>(`/reports/api/rules/${tj.id}/transactions`);
+    expect(txns).toHaveLength(size);
+    expect(txns.every((t) => t.provenance === `rule:${tj.id}` && t.merchantSource === `rule:${tj.id}`)).toBe(true);
+    const dates = txns.map((t) => t.date);
+    expect(dates).toEqual([...dates].sort().reverse());
+    expect((await app.inject({ method: "GET", url: "/reports/api/rules/999999/transactions", headers: { host: "localhost" } })).statusCode).toBe(404);
+  });
+
+  it("edits a rule's category, which moves what it set, and deletes it, which leaves them be", async () => {
+    const headers = { host: "localhost", "x-csrf-token": csrf };
+    const tj = (await get<RuleDto[]>("/reports/api/rules")).find((r) => JSON.stringify(r.definition).includes("trader joes"))!;
+    const definition = descriptionKeyRule("trader joes", { merchant: "Trader Joe's", categoryId: "food-and-drink.restaurant" });
+    const put = await app.inject({ method: "PUT", url: `/reports/api/rules/${tj.id}`, payload: { definition, applyToPast: true }, headers });
+    expect(put.statusCode, put.body).toBe(200);
+    expect(put.json()).toMatchObject({ id: tj.id, version: 2, action: "rule_update", backfilled: tj.applied });
+    const moved = await get<TxnDto[]>(`/reports/api/rules/${tj.id}/transactions`);
+    expect(moved).toHaveLength(tj.applied);
+    expect(moved.every((t) => t.categoryId === "food-and-drink.restaurant")).toBe(true);
+
+    const del = await app.inject({ method: "DELETE", url: `/reports/api/rules/${tj.id}`, headers });
+    expect(del.statusCode, del.body).toBe(200);
+    expect((await get<RuleDto[]>("/reports/api/rules")).some((r) => r.id === tj.id)).toBe(false);
+    expect((await app.inject({ method: "GET", url: `/reports/api/rules/${tj.id}/transactions`, headers: { host: "localhost" } })).statusCode).toBe(404);
+    const kept = await get<TxnDto[]>("/reports/api/transactions");
+    expect(kept.filter((t) => t.provenance === `rule:${tj.id}` && t.merchant === "Trader Joe's")).toHaveLength(tj.applied);
   });
 
   it("refuses a rule that sets nothing, or an unknown category", async () => {

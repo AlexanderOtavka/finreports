@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BuilderCandidateDto, BuilderGroupDto, CategoryDto, RecategorizeRequest, RulePreviewCounts, SuggestionsDto, TxnDto, UiContext } from "../../shared/api.js";
+import type { BuilderCandidateDto, BuilderGroupDto, CategoryDto, RecategorizeRequest, RuleDto, RulePreviewCounts, SuggestionsDto, TxnDto, UiContext } from "../../shared/api.js";
 import { descriptionKey } from "../../shared/merchant.js";
-import { ruleFor, type Predicate } from "../../shared/rules.js";
+import { ruleActions, ruleFor, type Predicate, type RuleDefinition } from "../../shared/rules.js";
 import { PLAID_TAXONOMY } from "../../shared/taxonomy.js";
 import { api } from "../api.js";
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney, formatRange } from "../format.js";
+import { describePredicate, ruleTitle } from "../rules-text.js";
 import { Amount, confidenceLabel } from "./builder-parts.js";
 import { useSheet } from "./sheet.js";
 
-/** What the sheet is about: one transaction (from a report), or a rules builder group. */
-export type SheetSubject = { kind: "txn"; txn: TxnDto } | { kind: "group"; group: BuilderGroupDto };
+/** What the sheet is about: one transaction (from a report), a rules builder group, or a rule. */
+export type SheetSubject =
+  | { kind: "txn"; txn: TxnDto }
+  | { kind: "group"; group: BuilderGroupDto }
+  | { kind: "rule"; rule: RuleDto; definition: RuleDefinition };
 
 interface Props {
   subject: SheetSubject;
@@ -19,8 +23,11 @@ interface Props {
   onClose(): void;
   /** A transaction's change, for the app to save (and show at once). */
   onSave?(req: RecategorizeRequest): void;
-  /** A group's rule is saved; `text` says what it did. */
-  onSaved?(text: string): void;
+  /** A group's new rule, or a rule's new version: for the caller to save (and show at once). */
+  onSaveRule?(definition: RuleDefinition, applyToPast: boolean): void;
+  onDeleteRule?(): void;
+  /** For a rule: the transactions it has set now. */
+  applied?: TxnDto[];
   /** Show every transaction from this transaction's merchant. */
   onSearchMerchant?(txn: TxnDto): void;
 }
@@ -56,6 +63,9 @@ function merchantSourceLabel(source: string | undefined): string {
   return "From the ledger";
 }
 
+/** Transactions of a rule drawn at first, and added with "Show more". */
+const APPLIED_PAGE = 50;
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 /**
@@ -67,29 +77,38 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
  * - Category: suggestions, search, or browse the whole tree.
  * - Rule: do the same for every transaction like it (by merchant or by description), with a
  *   live count of what it would change now. Always on for a group: the rule is the point.
+ *
+ * For a rule already saved: what it sets (the merchant and the category, to change), what it
+ * matches (as it is), and the transactions it has set; or delete it.
  */
-export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onSaved, onSearchMerchant }: Props) {
+export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onSaveRule, onDeleteRule, applied, onSearchMerchant }: Props) {
   const txn = subject.kind === "txn" ? subject.txn : null;
   const group = subject.kind === "group" ? subject.group : null;
-  const key = txn ? descriptionKey(txn.description) : group!.key;
+  const rule = subject.kind === "rule" ? subject : null;
+  /** What the rule being edited sets now. */
+  const saved = rule ? ruleActions(rule.definition) : null;
+  const key = txn ? descriptionKey(txn.description) : (group?.key ?? "");
 
   const [suggestions, setSuggestions] = useState<SuggestionsDto | null>(null);
   const candidates = group?.candidates ?? suggestions?.candidates ?? [];
   const first = group?.candidates[0];
 
   const [choice, setChoice] = useState<number | null>(first ? 0 : null);
-  const [merchant, setMerchant] = useState(txn ? txn.merchant : (first?.merchant ?? group!.label));
-  const [renaming, setRenaming] = useState(group ? group.missingMerchant > 0 : false);
-  const [selected, setSelected] = useState<string | null>(group ? (first?.categoryId ?? group.ownCategory?.categoryId ?? null) : null);
+  const initialMerchant = txn ? txn.merchant : saved ? (saved.merchant ?? "") : (first?.merchant ?? group!.label);
+  const [merchant, setMerchant] = useState(initialMerchant);
+  const [renaming, setRenaming] = useState(group ? group.missingMerchant > 0 : saved ? saved.merchant !== null : false);
+  const [selected, setSelected] = useState<string | null>(
+    group ? (first?.categoryId ?? group.ownCategory?.categoryId ?? null) : saved ? saved.categoryId : null,
+  );
   const [query, setQuery] = useState("");
   const [browsing, setBrowsing] = useState(false);
-  const [ruleOn, setRuleOn] = useState(group !== null);
+  const [ruleOn, setRuleOn] = useState(!txn);
   const [match, setMatch] = useState<"merchant" | "description">(txn && txn.merchantSource !== "none" ? "merchant" : "description");
   const [applyToPast, setApplyToPast] = useState(true);
   const [preview, setPreview] = useState<{ key: string; counts: RulePreviewCounts } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [appliedLimit, setAppliedLimit] = useState(APPLIED_PAGE);
   const sheet = useRef<HTMLDivElement>(null);
   useSheet(sheet, onClose);
 
@@ -107,28 +126,37 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [txn?.id]);
 
+
   const name = merchant.trim();
   /** The merchant this saves (on the transaction, and in the rule), if it sets one. */
   const newMerchant = renaming && name ? name : null;
   const merchantChange = txn ? newMerchant !== null && (newMerchant !== txn.merchant || txn.merchantSource === "none") : newMerchant !== null;
   const ruleCategory = selected ?? txn?.categoryId ?? null;
-  const when: Predicate = match === "merchant" && txn ? { merchant: { equals: txn.merchantKey } } : { descriptionKey: { equals: key } };
-  const definition = useMemo(
-    () => (ruleOn ? ruleFor(when, { merchant: newMerchant, categoryId: ruleCategory }) : null),
+  const when: Predicate = rule
+    ? rule.definition.when
+    : match === "merchant" && txn
+      ? { merchant: { equals: txn.merchantKey } }
+      : { descriptionKey: { equals: key } };
+  const definition = useMemo(() => {
+    const made = ruleOn ? ruleFor(when, { merchant: newMerchant, categoryId: ruleCategory }) : null;
+    // A rule's name stays with it through edits.
+    return made && rule?.definition.name ? { ...made, name: rule.definition.name } : made;
     // `when` is new every render; what it is made of is here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ruleOn, match, key, txn?.merchantKey, newMerchant, ruleCategory],
-  );
-  const definitionKey = JSON.stringify(definition);
+  }, [ruleOn, match, key, txn?.merchantKey, rule, newMerchant, ruleCategory]);
+  /** A saved rule only changes, and counts what it would change, once it sets something else. */
+  const edited = !saved || (definition !== null && (newMerchant !== saved.merchant || ruleCategory !== saved.categoryId));
+  const proposed = edited ? definition : null;
+  const definitionKey = JSON.stringify(proposed);
 
   // What the rule would change now, a moment after the last edit.
   useEffect(() => {
-    if (!definition) return;
+    if (!proposed) return;
     const ctl = new AbortController();
     setPreviewError(null);
     const timer = setTimeout(() => {
       api
-        .previewRule(definition, txn?.id, ctl.signal)
+        .previewRule(proposed, txn?.id, ctl.signal)
         .then((counts) => setPreview({ key: definitionKey, counts }))
         .catch((err: Error) => {
           if (err.name !== "AbortError") setPreviewError(err.message);
@@ -138,7 +166,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
       clearTimeout(timer);
       ctl.abort();
     };
-    // definitionKey stands for definition.
+    // definitionKey stands for proposed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [definitionKey, txn?.id]);
   const counts = preview && preview.key === definitionKey ? preview.counts : null;
@@ -154,7 +182,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
 
   const undoRename = () => {
     setRenaming(false);
-    setMerchant(txn ? txn.merchant : (first?.merchant ?? group!.label));
+    setMerchant(rule ? "" : initialMerchant);
   };
 
   // The categories worth a tap: the merchants it looks like, the group's own, this merchant's
@@ -163,6 +191,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
     const ids = [
       ...candidates.map((c) => c.categoryId),
       ...(group?.ownCategory ? [group.ownCategory.categoryId] : []),
+      ...(saved?.categoryId ? [saved.categoryId] : []),
       ...(suggestions?.likely ?? []),
       ...(suggestions?.recent ?? []),
     ];
@@ -170,11 +199,12 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
   }, [candidates, group, suggestions, categories]);
   const results = useMemo(() => categories.search(query), [categories, query]);
 
-  const waitingForPreview = definition !== null && counts === null && previewError === null;
-  const nothingToDo = txn ? selected === null && !merchantChange && definition === null : definition === null;
+  const nothingToDo = txn ? selected === null && !merchantChange && definition === null : proposed === null;
 
-  const save = async () => {
-    const past = applyToPast && (counts?.count ?? 0) > 0;
+  // The sheet closes at once: the change is shown, and saved behind it. Without a count yet,
+  // the past is changed if asked; with one of nothing, there is nothing to change.
+  const save = () => {
+    const past = applyToPast && (counts === null || counts.count > 0);
     if (txn) {
       onSave?.({
         ...(selected !== null ? { categoryId: selected } : {}),
@@ -184,23 +214,21 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
       });
       return;
     }
-    if (!definition) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const res = await api.saveRule(definition, past, { ...uiContext, surface: "rules-builder" });
-      const what = [newMerchant, ruleCategory ? categories.name(ruleCategory) : null].filter(Boolean).join(", ");
-      onSaved?.(`Rule saved: ${what}` + (res.backfilled > 0 ? ` · ${plural(res.backfilled, "transaction")} updated` : ""));
-    } catch (err) {
-      setSaveError((err as Error).message);
-      setSaving(false);
-    }
+    if (proposed) onSaveRule?.(proposed, past);
   };
 
-  const buttonLabel = saving
-    ? "Saving…"
-    : group
-      ? "Create rule"
+  // Deleting a rule leaves what it set as it is; it only stops setting it.
+  const remove = () => {
+    if (confirmDelete) onDeleteRule?.();
+    else setConfirmDelete(true);
+  };
+
+  const buttonLabel = group
+    ? "Create rule"
+    : rule
+      ? edited
+        ? "Save rule"
+        : "No changes"
       : nothingToDo
         ? "Pick a category, or rename"
         : selected !== null && !merchantChange && !definition
@@ -230,8 +258,11 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
   // Plaid's guess is worth showing only once the category has moved away from it.
   const plaidRaw = txn ? plaidLabel(txn.plaidPrimary, txn.plaidDetailed) : null;
   const plaid = txn && plaidRaw && plaidRaw !== categories.path(txn.categoryId) ? plaidRaw : null;
-  const title = txn ? txn.merchant : group!.label;
+  const title = txn ? txn.merchant : rule ? ruleTitle(rule.definition) : group!.label;
   const canRename = txn ? txn.type !== "transfer" : true;
+  // A rule matching on something other than a merchant has no one to look up, unless it names one.
+  const canLookUp = !rule || saved!.merchant !== null || "merchant" in rule.definition.when;
+  const appliedTotal = applied?.reduce((sum, t) => sum + (t.type === "transfer" ? 0 : t.amount), 0) ?? null;
 
   return (
     <div className="sheet-backdrop" onClick={onClose} data-testid="sheet-backdrop">
@@ -263,29 +294,37 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
               ) : (
                 <span className="sheet-merchant-text">{title}</span>
               )}
-              <a
-                className="sheet-lookup"
-                href={lookUpUrl(title)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Look up ${title} on DuckDuckGo`}
-                data-testid="merchant-lookup"
-              >
-                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
-                  <path d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Look up
-              </a>
+              {canLookUp && (
+                <a
+                  className="sheet-lookup"
+                  href={lookUpUrl(title)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Look up ${title} on DuckDuckGo`}
+                  data-testid="merchant-lookup"
+                >
+                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+                    <path d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Look up
+                </a>
+              )}
             </h2>
             {txn ? (
               <span className={`sheet-amount ${txn.type === "transfer" ? "transfer" : txn.amount > 0 ? "inflow" : "outflow"}`}>
                 {txn.amount > 0 ? "+" : ""}
                 {formatMoney(Math.abs(txn.amount))}
               </span>
-            ) : (
+            ) : group ? (
               <span className="sheet-amount">
-                <Amount value={group!.total} />
+                <Amount value={group.total} />
               </span>
+            ) : (
+              appliedTotal !== null && (
+                <span className="sheet-amount">
+                  <Amount value={appliedTotal} />
+                </span>
+              )
             )}
           </div>
           {txn ? (
@@ -347,6 +386,10 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
                 </dl>
               )}
             </>
+          ) : rule ? (
+            <p className="sheet-sub" data-testid="rule-sub">
+              {plural(applied?.length ?? 0, "transaction")} · {rule.rule.version > 1 ? "changed" : "made"} {formatDate(rule.rule.updatedAt.slice(0, 10))}
+            </p>
           ) : (
             <>
               <p className="sheet-sub">
@@ -438,7 +481,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
           )}
           {group && candidates.length === 0 && (
             <p className="sheet-note" data-testid="no-candidates">
-              No merchant with a category looks like this group: name it yourself.
+              No match. Name it yourself.
               {group.ownCategory && ` ${group.ownCategory.count} of its own are in ${categories.name(group.ownCategory.categoryId)}.`}
             </p>
           )}
@@ -472,15 +515,29 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
                   </>
                 ) : txn ? (
                   merchantSourceLabel(txn.merchantSource)
+                ) : rule ? (
+                  newMerchant ? (
+                    <>
+                      Names them
+                      {saved!.merchant !== null && newMerchant !== saved!.merchant && <> (was {saved!.merchant})</>}{" "}
+                      <button type="button" className="link-button" onClick={undoRename} data-testid="merchant-undo">
+                        Don't name them
+                      </button>
+                    </>
+                  ) : saved!.merchant !== null ? (
+                    `Stops naming them ${saved!.merchant}`
+                  ) : (
+                    "Doesn't name them"
+                  )
                 ) : renaming ? (
                   <>
-                    {group!.missingMerchant > 0 ? `${group!.missingMerchant} of them have no merchant` : "They all have a merchant: this renames them"}{" "}
+                    {group!.missingMerchant > 0 ? `${group!.missingMerchant} have none` : "Renames them all"}{" "}
                     <button type="button" className="link-button" onClick={undoRename} data-testid="merchant-undo">
-                      Leave the merchant alone
+                      Keep theirs
                     </button>
                   </>
                 ) : (
-                  "Leaving the merchant alone"
+                  "Keeping their merchants"
                 )}
               </p>
             </section>
@@ -506,7 +563,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
                     role="option"
                     aria-selected={selected === id}
                     className={`chip${selected === id ? " selected" : ""}`}
-                    onClick={() => setSelected(selected === id && group ? null : id)}
+                    onClick={() => setSelected(selected === id && !txn ? null : id)}
                     data-category-id={id}
                     data-testid="suggestion"
                   >
@@ -571,7 +628,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
             {txn ? (
               <label className="toggle-row">
                 <span className="toggle-text sheet-section" id="sheet-rule-label">
-                  Do this for every transaction like it
+                  Make it a rule
                 </span>
                 <input type="checkbox" role="switch" className="switch" checked={ruleOn} onChange={(e) => setRuleOn(e.target.checked)} data-testid="always-toggle" />
               </label>
@@ -611,7 +668,18 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
                   </div>
                 )}
                 <p className="rule-summary" data-testid="rule-summary">
-                  When {match === "merchant" && txn ? <>the merchant is <strong>{txn.merchant}</strong></> : <>the description reduces to <code>{key}</code></>}
+                  When{" "}
+                  {rule ? (
+                    describePredicate(rule.definition.when)
+                  ) : match === "merchant" && txn ? (
+                    <>
+                      the merchant is <strong>{txn.merchant}</strong>
+                    </>
+                  ) : (
+                    <>
+                      the description reduces to <code>{key}</code>
+                    </>
+                  )}
                   {definition ? (
                     <>
                       {newMerchant && (
@@ -633,6 +701,49 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
               </>
             )}
           </section>
+
+          {rule && (
+            <section aria-labelledby="sheet-applied-label" className="sheet-applied">
+              <h3 className="sheet-section" id="sheet-applied-label">
+                Applied to{applied && applied.length > 0 ? ` ${plural(applied.length, "transaction")}` : ""}
+              </h3>
+              {!applied || applied.length === 0 ? (
+                <p className="sheet-note" data-testid="applied-none">
+                  Nothing yet.
+                </p>
+              ) : (
+                <ul className="sheet-txns" data-testid="applied-txns">
+                  {applied.slice(0, appliedLimit).map((x) => (
+                    <li key={x.id} data-testid="applied-txn">
+                      <span className="sheet-txn-main">
+                        <span className="sheet-txn-head">
+                          <strong>{x.merchant}</strong>
+                          <span className="muted"> · {categories.name(x.categoryId)}</span>
+                        </span>
+                        <span className="mono">{x.description}</span>
+                        <span className="muted">
+                          {formatDate(x.date)}
+                          {x.accountName ? ` · ${x.accountName}` : ""}
+                          {" · "}
+                          {[x.merchantSource === `rule:${rule.rule.id}` ? "named" : null, x.provenance === `rule:${rule.rule.id}` ? "categorized" : null]
+                            .filter(Boolean)
+                            .join(", ")}
+                        </span>
+                      </span>
+                      <Amount value={x.amount} />
+                    </li>
+                  ))}
+                  {applied.length > appliedLimit && (
+                    <li>
+                      <button type="button" className="btn-quiet" onClick={() => setAppliedLimit((n) => n + APPLIED_PAGE)}>
+                        Show more ({(applied.length - appliedLimit).toLocaleString("en-US")})
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </section>
+          )}
 
           {group && (
             <details className="sheet-group-txns">
@@ -657,36 +768,40 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
         </div>
 
         <footer className="sheet-footer">
-          {definition && (
+          {proposed && (
             <div className="rule-preview" data-testid="rule-preview" aria-live="polite">
               {previewError ? (
                 <span className="error">{previewError}</span>
               ) : !counts ? (
-                <span className="muted">Counting what the rule would change…</span>
+                <span className="muted">Counting…</span>
               ) : counts.count === 0 ? (
-                <span className="muted">Nothing else to change now; the rule applies to new transactions.</span>
+                <span className="muted">Nothing to change now. Applies to new ones.</span>
               ) : (
                 <label className="check-row">
                   <input type="checkbox" checked={applyToPast} onChange={(e) => setApplyToPast(e.target.checked)} data-testid="apply-past" />
                   <span>
-                    Also change <strong data-testid="preview-count">{counts.count}</strong> past {counts.count === 1 ? "transaction" : "transactions"}
+                    Apply to <strong data-testid="preview-count">{counts.count}</strong> past {counts.count === 1 ? "transaction" : "transactions"}
                     <span className="muted">
                       {" "}
                       (
-                      {[counts.merchantCount > 0 ? `${counts.merchantCount} renamed` : null, counts.categoryCount > 0 ? `${counts.categoryCount} recategorized` : null]
+                      {[counts.merchantCount > 0 ? `${counts.merchantCount} named` : null, counts.categoryCount > 0 ? `${counts.categoryCount} categorized` : null]
                         .filter(Boolean)
                         .join(", ")}
-                      ; never what you set by hand)
+                      )
                     </span>
                   </span>
                 </label>
               )}
             </div>
           )}
-          {saveError && <p className="error sheet-error">Not saved: {saveError}</p>}
-          <button type="button" className="btn-primary" disabled={nothingToDo || waitingForPreview || saving} onClick={() => void save()} data-testid="save">
+          <button type="button" className="btn-primary" disabled={nothingToDo} onClick={save} data-testid="save">
             {buttonLabel}
           </button>
+          {rule && (
+            <button type="button" className="btn-quiet btn-danger" onClick={remove} data-testid="delete-rule">
+              {confirmDelete ? "Tap again to delete (what it set stays)" : "Delete rule"}
+            </button>
+          )}
         </footer>
       </div>
     </div>
