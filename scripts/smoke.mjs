@@ -255,6 +255,24 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
       JSON.stringify(navLinks) === JSON.stringify([["Ledger", "/", null], ["Bank sync", "https://bank-sync.example.com/", "_blank"]]),
       `top bar shows the NAV_LINKS (${JSON.stringify(navLinks)})`,
     );
+    // Under a status bar, an opaque fixed strip across the top edge in the navbar's colour keeps
+    // iOS's top-edge blur off; with no inset it has no height.
+    const strip = await page.evaluate(() => {
+      const el = document.querySelector(".status-bar-backdrop");
+      const style = getComputedStyle(el);
+      return {
+        rect: el.getBoundingClientRect().toJSON(),
+        fixed: style.position === "fixed",
+        colour: style.backgroundColor,
+        navbar: getComputedStyle(document.querySelector(".navbar")).backgroundColor,
+        width: window.innerWidth,
+      };
+    });
+    assert(
+      strip.fixed && strip.rect.top === 0 && strip.rect.height === (safeArea?.top ?? 0) &&
+        (!safeArea || (strip.rect.width === strip.width && strip.colour === strip.navbar)),
+      `status bar strip is fixed, the inset's height, full width and navbar-coloured (${JSON.stringify(strip)})`,
+    );
     // A preset range is kept in the URL by name, not as dates.
     const opened = urlParams();
     assert(opened.range === "30d" && !opened.from && !opened.to, `opens on the last 30 days (${page.url()})`);
