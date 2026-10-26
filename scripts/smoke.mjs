@@ -255,6 +255,21 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
       JSON.stringify(navLinks) === JSON.stringify([["Ledger", "/", null], ["Bank sync", "https://bank-sync.example.com/", "_blank"]]),
       `top bar shows the NAV_LINKS (${JSON.stringify(navLinks)})`,
     );
+    // The top bar is fixed across the top edge, opaque, and padded by the safe area: what keeps
+    // iOS's top-edge blur off an installed app.
+    const bar = await page.evaluate(() => {
+      const topbar = getComputedStyle(document.querySelector(".topbar"));
+      return {
+        position: topbar.position,
+        background: topbar.backgroundColor,
+        top: document.querySelector(".topbar").getBoundingClientRect().top,
+        padding: getComputedStyle(document.querySelector(".navbar")).paddingTop,
+      };
+    });
+    assert(
+      bar.position === "fixed" && bar.top === 0 && !/rgba\(.*, 0\)/.test(bar.background) && bar.padding === `${safeArea?.top ?? 0}px`,
+      `top bar fixed at the top edge, opaque, padded by the safe area (${JSON.stringify(bar)})`,
+    );
     // A preset range is kept in the URL by name, not as dates.
     const opened = urlParams();
     assert(opened.range === "30d" && !opened.from && !opened.to, `opens on the last 30 days (${page.url()})`);
