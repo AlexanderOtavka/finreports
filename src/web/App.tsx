@@ -509,8 +509,9 @@ export function App() {
     setSearch(`"${txn.merchant}"`);
   }, []);
 
-  // The top bar's height (safe area, navbar, tabs) as --topbar-h: the transactions' header
-  // sticks right under it, and the page leaves room to scroll that header up to it.
+  // The top bar's height (safe area, navbar, tabs) as --topbar-h: the page starts under it, the
+  // transactions' header sticks right under it, and the page leaves room to scroll that header
+  // up to it.
   const topbar = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const node = topbar.current;
@@ -518,14 +519,14 @@ export function App() {
     const ro = new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${node.getBoundingClientRect().height}px`));
     ro.observe(node);
     return () => ro.disconnect();
-  }, [fatal]);
+  }, [fatal, loggedOut]);
 
   // --- Rendering -------------------------------------------------------------------------
 
   if (loggedOut) {
     return (
       <main className="app">
-        <header className="topbar">
+        <header className="topbar" ref={topbar}>
           <div className="navbar">
             <h1 className="brand">
               <a href="/reports/">

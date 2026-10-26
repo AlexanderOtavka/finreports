@@ -255,23 +255,20 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
       JSON.stringify(navLinks) === JSON.stringify([["Ledger", "/", null], ["Bank sync", "https://bank-sync.example.com/", "_blank"]]),
       `top bar shows the NAV_LINKS (${JSON.stringify(navLinks)})`,
     );
-    // Under a status bar, an opaque fixed strip across the top edge in the navbar's colour keeps
-    // iOS's top-edge blur off; with no inset it has no height.
-    const strip = await page.evaluate(() => {
-      const el = document.querySelector(".status-bar-backdrop");
-      const style = getComputedStyle(el);
+    // The top bar is fixed across the top edge, opaque, and padded by the safe area: what keeps
+    // iOS's top-edge blur off an installed app.
+    const bar = await page.evaluate(() => {
+      const topbar = getComputedStyle(document.querySelector(".topbar"));
       return {
-        rect: el.getBoundingClientRect().toJSON(),
-        fixed: style.position === "fixed",
-        colour: style.backgroundColor,
-        navbar: getComputedStyle(document.querySelector(".navbar")).backgroundColor,
-        width: window.innerWidth,
+        position: topbar.position,
+        background: topbar.backgroundColor,
+        top: document.querySelector(".topbar").getBoundingClientRect().top,
+        padding: getComputedStyle(document.querySelector(".navbar")).paddingTop,
       };
     });
     assert(
-      strip.fixed && strip.rect.top === 0 && strip.rect.height === (safeArea?.top ?? 0) &&
-        (!safeArea || (strip.rect.width === strip.width && strip.colour === strip.navbar)),
-      `status bar strip is fixed, the inset's height, full width and navbar-coloured (${JSON.stringify(strip)})`,
+      bar.position === "fixed" && bar.top === 0 && !/rgba\(.*, 0\)/.test(bar.background) && bar.padding === `${safeArea?.top ?? 0}px`,
+      `top bar fixed at the top edge, opaque, padded by the safe area (${JSON.stringify(bar)})`,
     );
     // A preset range is kept in the URL by name, not as dates.
     const opened = urlParams();

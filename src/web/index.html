@@ -8,7 +8,8 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- No black-translucent: since iOS 26 that status bar gets a blur no page can take off,
+         reaching onto the navbar. The default one is solid, in the theme-color. -->
     <meta name="apple-mobile-web-app-title" content="Reports" />
     <link rel="manifest" href="/reports/manifest.webmanifest" />
     <link rel="icon" href="/reports/favicon.svg" type="image/svg+xml" />
@@ -16,7 +17,6 @@
     <title>Finance reports</title>
   </head>
   <body>
-    <div class="status-bar-backdrop" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

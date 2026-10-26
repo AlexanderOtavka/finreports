@@ -39,9 +39,11 @@
   font-size: 15px;
   line-height: 1.42857;
   color: var(--text);
-  /* The navbar's blue past the page's edges: behind a browser's see-through bars (Orion), and
-     in the gap when iOS bounces the page past its top or bottom. The page itself is gray. */
-  background: var(--navbar);
+  /* The navbar's blue past the page's top edge, behind a browser's see-through bars (Orion);
+     gray, the page's own colour, everywhere else. Since iOS 26 an installed app fills the gap
+     it bounces open with a colour of its own, and a full blue root showed through as a hairline
+     at the page's bottom. */
+  background: linear-gradient(var(--navbar), var(--navbar)) top / 100% 50vh no-repeat var(--bg);
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
@@ -135,13 +137,24 @@ a {
 
 /* --- Top bar: navbar, links to other apps, report tabs --------------------------------- */
 
-/* With the iOS keyboard up, the sticky headers scroll off with the page. Moving them down to
-   the visible part from visualViewport's scroll events always lands a frame late, and jitters. */
+/* Fixed, not sticky, and opaque. Since iOS 26 an installed app gets a blur over its top edge,
+   reaching onto the navbar; WebKit leaves it off when an opaque position: fixed box runs
+   across the top (a sticky one does not count). And pulled past the top, iOS moves a sticky
+   bar down with the page and shows the gray behind it; a fixed one stays put. The page is
+   padded by its height (--topbar-h). With the iOS keyboard up, the top bar and the sticky headers scroll off
+   with the page. Moving them down to the visible part from visualViewport's scroll events
+   always lands a frame late, and jitters. */
 .topbar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: var(--z-topbar);
+  background: var(--navbar);
   box-shadow: var(--shadow);
+}
+.app:has(> .topbar) {
+  padding-top: var(--topbar-h);
 }
 .navbar {
   display: flex;
@@ -168,21 +181,6 @@ a {
 }
 .brand b {
   font-weight: 700;
-}
-/* Since iOS 26 an installed app gets a blur over its top edge, reaching past the status bar onto
-   the navbar. WebKit leaves it off when an opaque position: fixed box runs across the top edge
-   (a sticky one, like the top bar, does not count), and colours the status bar from it. This
-   strip is that box: the navbar's blue, as tall as the status bar, so there is nothing to see;
-   no height at all where there is no inset. Under the sheet's backdrop, which dims it too. */
-.status-bar-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: env(safe-area-inset-top);
-  background: var(--navbar);
-  z-index: calc(var(--z-topbar) + 1);
-  pointer-events: none;
 }
 /* DEV_AUTH_BYPASS: a ribbon across the top-left corner (under the status bar of an installed
    app), over everything and in the way of nothing: the bar lays out as it will in production. */
