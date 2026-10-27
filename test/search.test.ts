@@ -128,3 +128,29 @@ describe("number terms", () => {
     ]);
   });
 });
+
+describe("amount comparisons", () => {
+  it("parse with or without a dollar sign, comma or space, and in every spelling", () => {
+    expect(parseQuery(">$20 <= 1,000.50 ≥5 ≠ 6.25 == 3 =<4 coffee")).toEqual([">20", "<=1000.5", ">=5", "!=6.25", "=3", "<=4", "coffee"]);
+    // An operator alone, as while typing one, is not yet a term; one stuck to a word is just text.
+    expect(parseQuery("coffee >")).toEqual(["coffee"]);
+    expect(parseQuery("a>20 >20abc")).toEqual(["a>20", ">20abc"]);
+  });
+
+  it("compare the amount, money in or out alike", () => {
+    expect(ids(">$20")).toEqual([3, 4, 5]);
+    expect(ids(">= 96.40")).toEqual([3, 5]);
+    expect(ids("<6.25")).toEqual([2]);
+    expect(ids("<=6.25")).toEqual([1, 2]);
+    expect(ids("=1210")).toEqual([5]);
+    expect(ids("!=6.25")).toEqual([2, 3, 4, 5]);
+    expect(ids(">5 <50 food")).toEqual([1, 2, 4]);
+    expect(ids(">20 <= 100")).toEqual([3, 4]);
+  });
+
+  it("are not highlighted, and are never why a hidden field matched", () => {
+    expect(highlightParts("$41.10", [">20"])).toEqual([{ text: "$41.10", match: false }]);
+    const search = new TxnSearch(TXNS, categories);
+    expect(search.hiddenMatches(TXNS[3]!, parseQuery(">20"), ["Tasca Lisbon 0412"])).toEqual([]);
+  });
+});
