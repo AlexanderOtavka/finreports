@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useMemo, useRef, useState } from "react";
 import type { BuilderDto, RuleDto, TxnDto } from "../shared/api.js";
+import { withGift } from "../shared/gift.js";
 import { merchantKey } from "../shared/merchant.js";
 import { evaluate, ruleActions, type RuleDefinition } from "../shared/rules.js";
 
@@ -126,17 +127,24 @@ const subject = (t: TxnDto) => ({
   description: t.description,
   accountName: t.accountName,
   amount: t.amount,
+  date: t.date,
 });
 
 /**
  * A rule applied to past transactions, as the server will: never a merchant or a category set
- * by hand, never a transfer's merchant. Returns the same array when nothing changes.
+ * by hand, never a transfer's merchant. A gift rule marks gifts, never a transfer, a gift
+ * already marked, or one unmarked by hand. Returns the same array when nothing changes.
  */
 export function applyRule(txns: TxnDto[], id: number, definition: RuleDefinition): TxnDto[] {
   const then = ruleActions(definition);
   const source = `rule:${id}`;
   let changed = false;
   const out = txns.map((t) => {
+    if (then.gift) {
+      if (t.gift || t.giftSource === "manual" || t.type === "transfer" || !evaluate(definition.when, subject(t))) return t;
+      changed = true;
+      return withGift(t, true, source);
+    }
     if (!evaluate(definition.when, subject(t))) return t;
     let next = t;
     // As the server's backfill: only what it changes (one already in the category stays as it is).
@@ -166,7 +174,7 @@ export function upsertRule(rules: RuleDto[], id: number, definition: RuleDefinit
     next[i] = { ...old, id: old.id < 0 ? id : old.id, version: old.version + 1, definition, updatedAt: now };
     return next;
   }
-  return [{ id, version: 1, definition, createdAt: now, updatedAt: now, applied: 0, categorized: 0, named: 0 }, ...rules];
+  return [{ id, version: 1, definition, createdAt: now, updatedAt: now, applied: 0, categorized: 0, named: 0, gifted: 0 }, ...rules];
 }
 
 /**
@@ -175,6 +183,7 @@ export function upsertRule(rules: RuleDto[], id: number, definition: RuleDefinit
  */
 export function fillGroups(builder: BuilderDto, definition: RuleDefinition): BuilderDto {
   const then = ruleActions(definition);
+  if (then.gift) return builder;
   let changed = false;
   const groups = builder.groups.flatMap((g) => {
     const covered = g.descriptions.every((d) => evaluate(definition.when, { merchant: null, description: d.description, accountName: null, amount: 0 }));
@@ -189,11 +198,11 @@ export function fillGroups(builder: BuilderDto, definition: RuleDefinition): Bui
 }
 
 /** How many transactions each rule has set now, from the transactions themselves. */
-export function ruleCounts(txns: TxnDto[] | null): Map<number, { applied: number; named: number; categorized: number }> {
-  const out = new Map<number, { applied: number; named: number; categorized: number }>();
+export function ruleCounts(txns: TxnDto[] | null): Map<number, RuleCount> {
+  const out = new Map<number, RuleCount>();
   const at = (id: number) => {
     let c = out.get(id);
-    if (!c) out.set(id, (c = { applied: 0, named: 0, categorized: 0 }));
+    if (!c) out.set(id, (c = { applied: 0, named: 0, categorized: 0, gifted: 0 }));
     return c;
   };
   for (const t of txns ?? []) {
@@ -203,6 +212,18 @@ export function ruleCounts(txns: TxnDto[] | null): Map<number, { applied: number
     if (mer !== null) at(mer).named += 1;
     if (cat !== null) at(cat).applied += 1;
     if (mer !== null && mer !== cat) at(mer).applied += 1;
+    const gift = t.gift && t.giftSource.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
+    if (gift !== null) {
+      at(gift).gifted += 1;
+      if (gift !== cat && gift !== mer) at(gift).applied += 1;
+    }
   }
   return out;
+}
+
+export interface RuleCount {
+  applied: number;
+  named: number;
+  categorized: number;
+  gifted: number;
 }

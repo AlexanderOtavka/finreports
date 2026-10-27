@@ -212,8 +212,8 @@ describe("schema 2 rules", () => {
     // Schema 1 is unchanged: a category, always.
     expect(ruleDefinitionSchema.safeParse({ schema: 1, when: { merchant: { equals: "x" } }, then: { merchant: "X" } }).success).toBe(false);
     const parsed = ruleDefinitionSchema.parse({ schema: 2, when: { descriptionKey: { equals: "x" } }, then: { merchant: " X Co " } });
-    expect(ruleActions(parsed)).toEqual({ merchant: "X Co", categoryId: null });
-    expect(ruleActions(merchantRule("Lucali", "TST* LUCALI", "food-and-drink.restaurant"))).toEqual({ merchant: null, categoryId: "food-and-drink.restaurant" });
+    expect(ruleActions(parsed)).toEqual({ merchant: "X Co", categoryId: null, gift: false });
+    expect(ruleActions(merchantRule("Lucali", "TST* LUCALI", "food-and-drink.restaurant"))).toEqual({ merchant: null, categoryId: "food-and-drink.restaurant", gift: false });
   });
 });
 

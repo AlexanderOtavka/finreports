@@ -4,9 +4,10 @@ import { ruleActions, ruleDefinitionSchema, type RuleDefinition } from "../../sh
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney, formatRange } from "../format.js";
 import { ruleCounts } from "../ledger.js";
-import { describePredicate, ruleTitle } from "../rules-text.js";
+import { describePredicate, giftRuleWhen, ruleTitle } from "../rules-text.js";
 import { amountForms, dateForms, parseQuery, Search, type HiddenField } from "../search.js";
 import { Amount, confidenceLabel } from "./builder-parts.js";
+import { GiftIcon, GiftSheet } from "./GiftSheet.js";
 import { RuleSheet, type SheetSubject } from "./RuleSheet.js";
 import { Hl, SearchIcon } from "./search-parts.js";
 
@@ -75,8 +76,13 @@ function groupShown(g: BuilderGroupDto, categories: CategoryTree): string[] {
   ];
 }
 
+/** What a rule's row says. A gift rule's says only when it is on: what it matches would give it away. */
 function ruleShown(r: RuleItem, categories: CategoryTree): string[] {
   const then = ruleActions(r.definition);
+  if (then.gift) {
+    const when = giftRuleWhen(r.definition);
+    return [ruleTitle(r.definition), when?.dates ?? "", when?.status ?? "", "Hides the merchant"];
+  }
   return [ruleTitle(r.definition), `When ${describePredicate(r.definition.when)}`, then.merchant ?? "", categories.path(then.categoryId)];
 }
 
@@ -93,6 +99,8 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
   const [search, setSearch] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState<SheetSubject | null>(null);
+  /** The gift rule sheet: a new gift rule (null), or one to change. */
+  const [gift, setGift] = useState<{ rule: RuleItem | null } | null>(null);
 
   // Only the rules this app can read; a newer kind would be listed by a newer app.
   const items = useMemo<RuleItem[]>(
@@ -113,10 +121,12 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
       const mer = t.merchantSource.startsWith("rule:") ? Number(t.merchantSource.slice(5)) : null;
       if (cat !== null) add(cat, t);
       if (mer !== null && mer !== cat) add(mer, t);
+      const gift = t.gift && t.giftSource.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
+      if (gift !== null && gift !== cat && gift !== mer) add(gift, t);
     }
     return out;
   }, [txns]);
-  const none = { applied: 0, named: 0, categorized: 0 };
+  const none = { applied: 0, named: 0, categorized: 0, gifted: 0 };
 
   // --- Search: both lists at once, as the transactions' search works ----------------------
 
@@ -148,7 +158,11 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
       searching
         ? new Search(items, (r) => ({
             shown: ruleShown(r, categories),
-            hidden: [...new Set((appliedBy.get(r.rule.id) ?? []).map((t) => t.description))].map((d) => ({ label: "Applied to", value: d })),
+            // Never a gift's description: a search must not give it away.
+            hidden: [...new Set((appliedBy.get(r.rule.id) ?? []).filter((t) => !t.gift).map((t) => t.description))].map((d) => ({
+              label: "Applied to",
+              value: d,
+            })),
           }))
         : null,
     [searching, items, categories, appliedBy],
@@ -243,6 +257,17 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
     setOpen(null);
   };
   const applied = open?.kind === "rule" ? (appliedBy.get(open.rule.id) ?? []) : undefined;
+
+  const saveGift = (definition: RuleDefinition) => {
+    const editing = gift?.rule;
+    setGift(null);
+    if (editing) onUpdate(editing.rule.id, definition, true, { surface: "gift-rule" });
+    else onCreate(definition, true, { surface: "gift-rule" });
+  };
+  const deleteGift = () => {
+    if (gift?.rule) onDelete(gift.rule.rule.id);
+    setGift(null);
+  };
 
   // --- Rendering -------------------------------------------------------------------------
 
@@ -436,7 +461,12 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
         <section className="card rules-section" aria-labelledby="rules-head" data-testid="rules-summary">
           <header className="rules-section-head">
             <h2 id="rules-head">Rules</h2>
-            {items.length > 0 && <span className="muted">{count(setTotal, "transaction")} set</span>}
+            <span className="rules-head-end">
+              {items.length > 0 && <span className="muted">{count(setTotal, "transaction")} set</span>}
+              <button type="button" className="btn-quiet gift-new" onClick={() => setGift({ rule: null })} data-testid="gift-new">
+                <GiftIcon /> Gift rule
+              </button>
+            </span>
           </header>
           {items.length === 0 ? (
             <p className="empty">None yet. Tap a group above to make one.</p>
@@ -450,12 +480,14 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
                     const then = ruleActions(r.definition);
                     const c = counts.get(r.rule.id) ?? none;
                     const key = keyOf(r.rule.id);
+                    const when = then.gift ? giftRuleWhen(r.definition) : null;
+                    const openIt = () => (then.gift ? setGift({ rule: r }) : setOpen({ kind: "rule", rule: r.rule, definition: r.definition }));
                     return (
                       <li key={key}>
                         <button
                           type="button"
                           className={`builder-group${r.rule.id < 0 ? " saving" : ""}`}
-                          onClick={() => setOpen({ kind: "rule", rule: r.rule, definition: r.definition })}
+                          onClick={openIt}
                           data-testid="rule-item"
                           data-rule-id={r.rule.id}
                           data-rule-key={key}
@@ -469,10 +501,21 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
                             </span>
                           </span>
                           <span className="builder-group-meta">
-                            <Hl text={`When ${describePredicate(r.definition.when)}`} terms={terms} />
+                            {when ? (
+                              <>
+                                <Hl text={when.dates} terms={terms} />
+                                {" · "}
+                                <span className={when.active ? "gift-active" : undefined} data-testid="gift-status">
+                                  <Hl text={when.status} terms={terms} />
+                                </span>
+                              </>
+                            ) : (
+                              <Hl text={`When ${describePredicate(r.definition.when)}`} terms={terms} />
+                            )}
                           </span>
                           <span className="builder-match">
                             <span className="builder-arrow" aria-hidden="true">→</span>
+                            {then.gift && <Hl text="Hides the merchant" terms={terms} />}
                             {then.merchant && (
                               <strong>
                                 <Hl text={then.merchant} terms={terms} />
@@ -485,8 +528,13 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
                               </span>
                             )}
                           </span>
-                          {(c.named > 0 || c.categorized > 0) && (
+                          {(c.named > 0 || c.categorized > 0 || then.gift) && (
                             <span className="builder-group-tags">
+                              {then.gift && (
+                                <span className="prov prov-gift">
+                                  <GiftIcon /> Gift{c.gifted > 0 ? ` ${c.gifted.toLocaleString("en-US")}` : ""}
+                                </span>
+                              )}
                               {c.named > 0 && <span className="prov prov-rule">Named {c.named.toLocaleString("en-US")}</span>}
                               {c.categorized > 0 && <span className="prov prov-rule">Categorized {c.categorized.toLocaleString("en-US")}</span>}
                             </span>
@@ -512,6 +560,17 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
           onClose={close}
           onSaveRule={saveRule}
           onDeleteRule={deleteRule}
+        />
+      )}
+
+      {gift && (
+        <GiftSheet
+          rule={gift.rule ?? undefined}
+          categories={categories}
+          applied={gift.rule ? (appliedBy.get(gift.rule.rule.id) ?? []) : undefined}
+          onClose={() => setGift(null)}
+          onSave={saveGift}
+          onDelete={deleteGift}
         />
       )}
     </>

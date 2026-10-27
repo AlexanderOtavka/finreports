@@ -60,7 +60,9 @@ export function nameScore(merchant: string, key: string): number {
 }
 
 /** Whether a transaction is missing a merchant or a category. Transfers have neither, by design. */
-export const isDeficient = (row: TxnRow): boolean => row.type !== "transfer" && (row.merchant === null || row.category_id === null);
+/** Missing a merchant or a category. Not a gift: its description is hidden, and so its group. */
+export const isDeficient = (row: TxnRow): boolean =>
+  row.type !== "transfer" && !row.gift && (row.merchant === null || row.category_id === null);
 
 function toBuilderTxn(row: TxnRow): BuilderTxnDto {
   return {
@@ -114,7 +116,8 @@ interface Source {
 function sources(rows: TxnRow[]): Source[] {
   const byMerchant = new Map<string, TxnRow[]>();
   for (const r of rows) {
-    if (r.type === "transfer" || r.merchant === null || r.category_id === null) continue;
+    // A gift is no one's example: it would show where it was bought.
+    if (r.type === "transfer" || r.gift || r.merchant === null || r.category_id === null) continue;
     const list = byMerchant.get(r.merchant) ?? [];
     list.push(r);
     byMerchant.set(r.merchant, list);
@@ -241,7 +244,7 @@ export async function candidatesForTxn(db: Queryable, row: TxnRow): Promise<Buil
   if (!isDeficient(row)) return [];
   const res = await db.query<TxnRow>(
     `SELECT * FROM txn
-     WHERE deleted_at IS NULL AND type <> 'transfer' AND merchant IS NOT NULL AND category_id IS NOT NULL
+     WHERE deleted_at IS NULL AND type <> 'transfer' AND NOT gift AND merchant IS NOT NULL AND category_id IS NOT NULL
      ORDER BY date DESC, id DESC`,
   );
   return candidatesFor(descriptionKey(row.description), sources(res.rows));

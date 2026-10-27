@@ -42,6 +42,10 @@ export interface TxnRow {
   /** `backend`, `edited`, `manual` or `rule:<id>`. */
   merchant_provenance: string;
   merchant_dirty: boolean;
+  /** Marked as a gift: the app keeps its merchant out of lists, charts and search. */
+  gift: boolean;
+  /** `none`, `manual` or `rule:<id>`. */
+  gift_provenance: string;
 }
 
 export function toDto(row: TxnRow): TxnDto {
@@ -68,6 +72,8 @@ export function toDto(row: TxnRow): TxnDto {
     categoryId: row.category_id,
     provenance: row.category_provenance,
     merchantSource: row.merchant === null ? "none" : row.merchant_provenance,
+    gift: row.gift,
+    giftSource: row.gift_provenance,
   };
 }
 
@@ -76,7 +82,7 @@ function location(row: TxnRow): { lat: number; lon: number } | null {
 }
 
 export function toSubject(row: TxnRow): RuleSubject {
-  return { merchant: row.merchant, description: row.description, accountName: row.account_name, amount: row.amount };
+  return { merchant: row.merchant, description: row.description, accountName: row.account_name, amount: row.amount, date: row.date };
 }
 
 /** The transaction as the backend has it, before any rule filled in its merchant. */
@@ -126,5 +132,7 @@ export function snapshot(row: TxnRow): Record<string, unknown> {
     backendCategory: row.backend_category,
     categoryId: row.category_id,
     categoryProvenance: row.category_provenance,
+    gift: row.gift,
+    giftProvenance: row.gift_provenance,
   };
 }

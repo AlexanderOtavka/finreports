@@ -4,6 +4,7 @@ import { findReport, REPORTS } from "../reports/index.js";
 import { inScope, runReport, selection, toReportTxn } from "../reports/run.js";
 import type { RangePreset } from "../reports/types.js";
 import type { AccountDto, RecategorizeRequest, TxnDto, UiContext } from "../shared/api.js";
+import { withGift } from "../shared/gift.js";
 import { merchantKey } from "../shared/merchant.js";
 import { ruleDefinitionSchema, type RuleDefinition } from "../shared/rules.js";
 import { api, ApiError, isOffline, login, type ReportQuery } from "./api.js";
@@ -396,18 +397,27 @@ export function App() {
       setOpenTxn(null);
       const parsed = req.rule ? ruleDefinitionSchema.safeParse(req.rule.definition) : null;
       const rule = parsed?.success ? { temp: tempId(), definition: parsed.data, past: req.rule!.applyToPast } : null;
-      const edit = (t: TxnDto): TxnDto => ({
-        ...t,
-        ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
-        ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
-      });
+      const edit = (t: TxnDto): TxnDto => {
+        const next = {
+          ...t,
+          ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
+          ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
+        };
+        return req.gift !== undefined ? withGift(next, req.gift, "manual") : next;
+      };
       const apply = (s: LedgerState, idOf: (id: number) => number): LedgerState => {
         const next = rule ? withRule(s, idOf(rule.temp), rule.definition, rule.past) : s;
         // The transaction itself is as it was, with what was set by hand.
         const own = s.txns?.find((t) => t.id === txn.id);
         return { ...next, txns: next.txns && own ? next.txns.map((t) => (t.id === txn.id ? edit(own) : t)) : next.txns };
       };
-      const what = [req.merchant, req.categoryId ? categories.name(req.categoryId) : null].filter(Boolean).join(", ");
+      const what = [
+        req.merchant,
+        req.categoryId ? categories.name(req.categoryId) : null,
+        req.gift === true ? "gift" : req.gift === false ? "not a gift" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
       const touched = change({
         label: txn.merchant,
         apply,

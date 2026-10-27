@@ -1,5 +1,5 @@
-import { ruleActions, type Predicate, type RuleDefinition, type TextMatch } from "../shared/rules.js";
-import { formatMoney } from "./format.js";
+import { giftRuleParts, ruleActions, type Predicate, type RuleDefinition, type TextMatch } from "../shared/rules.js";
+import { formatDate, formatMoney, formatRange, today } from "./format.js";
 
 /** A rule's predicate in words, as in "When <this>, …". */
 export function describePredicate(p: Predicate): string {
@@ -20,6 +20,13 @@ export function describePredicate(p: Predicate): string {
     if (max !== undefined) return `the amount is at most ${money(max)}`;
     return "any amount";
   }
+  if ("date" in p) {
+    const { from, to } = p.date;
+    if (from && to) return from === to ? `it is on ${formatDate(from)}` : `it is from ${formatRange(from, to)}`;
+    if (from) return `it is on or after ${formatDate(from)}`;
+    if (to) return `it is on or before ${formatDate(to)}`;
+    return "any date";
+  }
   const nested = (q: Predicate) => ("all" in q || "any" in q ? `(${describePredicate(q)})` : describePredicate(q));
   if ("all" in p) return p.all.map(nested).join(" and ");
   if ("any" in p) return p.any.map(nested).join(" or ");
@@ -29,13 +36,27 @@ export function describePredicate(p: Predicate): string {
 /** A normalized key ("uber eats") as a name ("Uber Eats"). */
 const titleCase = (key: string) => key.replace(/(^|\s)([a-z])/g, (_, before: string, c: string) => before + c.toUpperCase());
 
-/** What to call a rule in a list: its name, the merchant it sets, or what it matches. */
+/**
+ * What to call a rule in a list: its name, the merchant it sets, or what it matches. A gift rule
+ * is only "Gift rule": its name and what it matches are for whoever opens it.
+ */
 export function ruleTitle(definition: RuleDefinition): string {
+  const { merchant, gift } = ruleActions(definition);
+  if (gift) return "Gift rule";
   if (definition.name) return definition.name;
-  const { merchant } = ruleActions(definition);
   if (merchant) return merchant;
   const when = definition.when;
   if ("merchant" in when && "equals" in when.merchant) return titleCase(when.merchant.equals);
   if ("descriptionKey" in when && "equals" in when.descriptionKey) return titleCase(when.descriptionKey.equals);
   return describePredicate(when);
+}
+
+/** A gift rule's dates, and whether it is on now, has yet to start, or is over. */
+export function giftRuleWhen(definition: RuleDefinition, now = today()): { dates: string; status: string; active: boolean } | null {
+  const parts = giftRuleParts(definition);
+  if (!parts) return null;
+  const dates = parts.from === parts.to ? formatDate(parts.from) : formatRange(parts.from, parts.to);
+  if (now < parts.from) return { dates, status: `Starts ${formatDate(parts.from)}`, active: false };
+  if (now > parts.to) return { dates, status: "Ended", active: false };
+  return { dates, status: "Active", active: true };
 }

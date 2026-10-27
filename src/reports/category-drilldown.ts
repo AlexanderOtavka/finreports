@@ -1,4 +1,5 @@
 import type { ReportData, ReportRow } from "../shared/api.js";
+import { listMerchant, listMerchantKey } from "../shared/gift.js";
 import { sumRows } from "./run.js";
 import type { ChartTheme, ReportDefinition } from "./types.js";
 
@@ -36,7 +37,8 @@ const report: ReportDefinition = {
     { name: "Category", key: (t) => t.topId, rows: (txns) => sumRows(txns, (t) => t.topId, (t) => t.topName) },
     { name: "Subcategory", key: (t) => t.leafId, rows: (txns) => sumRows(txns, (t) => t.leafId, (t) => t.leafName) },
     // Merchants as rules see them (the merchant key), named as most of their transactions are.
-    { name: "Merchant", key: (t) => t.merchantKey, rows: (txns) => sumRows(txns, (t) => t.merchantKey, (t) => t.merchant) },
+    // Gifts are one "Gift", which gives none of them away.
+    { name: "Merchant", key: listMerchantKey, rows: (txns) => sumRows(txns, listMerchantKey, listMerchant) },
   ],
 
   rowColor: (data, row, index, theme) => sliceColor(data, row, index, theme) ?? theme.other,

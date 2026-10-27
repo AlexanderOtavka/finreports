@@ -8,6 +8,7 @@
  * compares the amount, money in or out alike: `>20` is anything over $20.
  */
 import type { TxnDto } from "../shared/api.js";
+import { GIFT_LABEL } from "../shared/gift.js";
 import type { CategoryTree } from "./categories.js";
 import { formatDate, formatMoney } from "./format.js";
 
@@ -166,28 +167,49 @@ export class Search<T> {
   }
 }
 
+/**
+ * Searches transactions. A gift is found by what the list shows of it (its date, amount,
+ * category, account, and "gift"), never by its merchant, description or details: a search
+ * must not give it away.
+ */
 export class TxnSearch extends Search<TxnDto> {
   constructor(txns: TxnDto[], categories: CategoryTree) {
-    super(txns, (t) => ({
-      shown: [
-        t.merchant,
-        categories.name(t.categoryId),
-        categories.parentName(t.categoryId) ?? "",
-        ...dateForms(t.date),
-        ...amountForms(t.amount),
-        t.pending ? "pending" : "",
-        t.type,
-      ],
-      hidden: [
-        { label: "Description", value: t.description },
-        { label: "Account", value: t.accountName ?? "" },
-        { label: "Payee", value: t.counterparty ?? "" },
-        { label: "Notes", value: t.notes ?? "" },
-        { label: "Tags", value: t.tags.join(", ") },
-        { label: "Website", value: t.website?.replace(/^https?:\/\/(www\.)?/, "") ?? "" },
-        { label: "Plaid", value: t.plaidDetailed?.toLowerCase().replaceAll("_", " ") ?? "" },
-      ],
-    }), (t) => t.amount);
+    super(txns, (t) =>
+      t.gift
+        ? {
+            shown: [
+              GIFT_LABEL,
+              categories.name(t.categoryId),
+              categories.parentName(t.categoryId) ?? "",
+              ...dateForms(t.date),
+              ...amountForms(t.amount),
+              t.pending ? "pending" : "",
+              t.type,
+            ],
+            hidden: [{ label: "Account", value: t.accountName ?? "" }],
+          }
+        : {
+            shown: [
+              t.merchant,
+              categories.name(t.categoryId),
+              categories.parentName(t.categoryId) ?? "",
+              ...dateForms(t.date),
+              ...amountForms(t.amount),
+              t.pending ? "pending" : "",
+              t.type,
+            ],
+            hidden: [
+              { label: "Description", value: t.description },
+              { label: "Account", value: t.accountName ?? "" },
+              { label: "Payee", value: t.counterparty ?? "" },
+              { label: "Notes", value: t.notes ?? "" },
+              { label: "Tags", value: t.tags.join(", ") },
+              { label: "Website", value: t.website?.replace(/^https?:\/\/(www\.)?/, "") ?? "" },
+              { label: "Plaid", value: t.plaidDetailed?.toLowerCase().replaceAll("_", " ") ?? "" },
+            ],
+          },
+      (t) => t.amount,
+    );
   }
 }
 

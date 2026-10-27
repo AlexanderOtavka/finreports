@@ -1782,3 +1782,70 @@ a {
   margin: 0;
   font-size: 0.9rem;
 }
+
+/* --- Gifts: a hidden merchant, marked ------------------------------------------------------ */
+
+/* AdminLTE's maroon label. */
+.prov-gift {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  background: #d81b60;
+  color: #fff;
+}
+.prov-gift .gift-icon {
+  width: 0.95em;
+  height: 0.95em;
+}
+.gift-icon {
+  vertical-align: -0.1em;
+}
+.gift-hidden {
+  font-style: italic;
+  color: var(--text-3);
+}
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.toggle-text .sheet-hint {
+  margin: 0;
+}
+.rules-head-end {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.gift-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  color: #d81b60;
+}
+.gift-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.gift-dates label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.82rem;
+}
+.gift-active {
+  color: var(--inflow);
+  font-weight: 600;
+}
+.sheet-gift-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-3);
+}
