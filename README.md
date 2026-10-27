@@ -21,7 +21,8 @@ The magnifier above the transactions searches them, right in the browser: every 
 match some field (merchant, date as `2026-09-14`, `9/14`, `Sep 14` or `Monday`, category,
 amount, the bank's raw description, account, notes, tags, website), so `trader sep` is
 Trader Joe's in September. `"Quoted words"` stay together, and a number is a whole number
-(`20` is the 20th or $20, not 2025). Matches are highlighted; a word found only in a field
+(`20` is the 20th or $20, not 2025). `>$20`, `<=5`, `=96.40`, `!=20` (or `≥`, `≤`, `≠`)
+compare the amount, in or out alike, so `coffee >5` is the coffees over $5. Matches are highlighted; a word found only in a field
 the list does not show (a note, a tag) brings that field up under the row. Search keeps the
 chart's range and drill path (it says which, under the bar). The list's header adds up what it lists, all
 of it or the matches: the net, then money in − money out when there is some of each, so a
@@ -331,7 +332,7 @@ and drives Chromium (playwright-core) at a phone (390×844), a desktop (1280×90
 installed-app (393×852) viewport: load on the last 30 days → 90 days → Custom (the URL switches from `range=` to
 dates) → 1 year → reload offline (the same chart, from the service worker and the kept copy)
 and back online → a new build (the banner, and reload into it) → a session that is over
-(the same chart, and "Log in") → search the transactions (`trader`, then `trader <month>`, then a word only
+(the same chart, and "Log in") → search the transactions (`trader`, then `trader <month>`, `trader >$100`, `> 20 <= 30`, then a word only
 in the notes) → tap the Transportation slice → tap the "Taxis and rideshare" slice → open an
 Uber Eats order Plaid filed as a ride → pick Restaurants → "Always categorize" → preview count
 → save → the slice shrinks and the list updates → back up the breadcrumb → check the

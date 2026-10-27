@@ -149,7 +149,7 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
               { label: "Looks like", value: g.candidates.slice(1).map((c) => c.merchant).join(", ") },
               { label: "Merchant", value: [...new Set(g.txns.map((t) => t.merchant).filter(Boolean))].join(", ") },
             ],
-          }))
+          }), (g) => g.total)
         : null,
     [searching, builder, categories],
   );

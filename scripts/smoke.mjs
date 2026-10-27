@@ -2,7 +2,7 @@
 /**
  * Headless-browser smoke test of the real server: BACKEND=sample, a throwaway PostgreSQL,
  * the dev auth bypass, and Chromium driven by playwright-core, at a phone and a desktop
- * viewport. It walks the whole flow (load → search the transactions → tap a slice →
+ * viewport. It walks the whole flow (load → search the transactions, by amount too → tap a slice →
  * subcategories and filtered list → tap a subcategory → open a transaction → recategorize →
  * "always" rule → preview → apply → chart and list update → decision log export → a merchant's
  * transactions from the sheet → the rules builder: a group, its proposed rule, saved) and fails
@@ -410,6 +410,19 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     const net = Number(await page.getByTestId("txn-totals").getAttribute("data-net"));
     assert(amounts.length === tradersInMonth && Math.round(net * 100) === cents, `the net is the matches' sum (${net}, ${cents / 100})`);
     await shot("search-compound", { fullPage: true });
+    // An amount comparison: `trader >$100` is the big Trader Joe's runs, in or out.
+    await page.getByTestId("txn-search").fill("trader >$100");
+    const bigTraders = await searched();
+    assert(bigTraders > 0 && bigTraders < traders, `"trader >$100" narrows "trader" (${bigTraders})`);
+    const big = await page.locator("[data-testid=txn] .txn-amount").allInnerTexts();
+    assert(big.every((a) => Number(a.replace(/[^\d.]/g, "")) > 100), `all over $100 (${big})`);
+    await shot("search-amount", { fullPage: true });
+    // Two of them make a range.
+    await page.getByTestId("txn-search").fill("> 20 <= 30");
+    assert((await searched()) > 0, "a range of amounts matches");
+    const mid = await page.locator("[data-testid=txn] .txn-amount").allInnerTexts();
+    assert(mid.every((a) => Number(a.replace(/[^\d.]/g, "")) > 20 && Number(a.replace(/[^\d.]/g, "")) <= 30), `all in ($20, $30] (${mid})`);
+    await shot("search-amount-range", { fullPage: true });
     // A word the row does not show (the cat's name, in the vet visits' notes): the field it is
     // in is shown under the row.
     await page.getByTestId("txn-search").fill("miso");
