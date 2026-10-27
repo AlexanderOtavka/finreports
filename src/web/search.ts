@@ -4,7 +4,8 @@
  * found in at least one of its fields: merchant, raw description, category, account, amount,
  * date (in every way it is commonly written), notes, tags, website, payee. Matching ignores
  * case and accents. A term of only digits is a whole number (`20` is the 20th or $20, not
- * part of 2025); anything else may match inside a word.
+ * part of 2025); anything else may match inside a word. A term like `>$20`, `<= 5.50` or `≠100`
+ * compares the amount, money in or out alike: `>20` is anything over $20.
  */
 import type { TxnDto } from "../shared/api.js";
 import type { CategoryTree } from "./categories.js";
@@ -42,13 +43,45 @@ function matcher(term: string): RegExp {
 
 const has = (folded: string, term: string): boolean => matcher(term).test(folded);
 
+const OPS = {
+  ">": (a: number, b: number) => a > b,
+  ">=": (a: number, b: number) => a >= b,
+  "<": (a: number, b: number) => a < b,
+  "<=": (a: number, b: number) => a <= b,
+  "=": (a: number, b: number) => a === b,
+  "!=": (a: number, b: number) => a !== b,
+};
+type Op = keyof typeof OPS;
+const OP_ALIASES: Record<string, Op> = { "≥": ">=", "=>": ">=", "≤": "<=", "=<": "<=", "==": "=", "≠": "!=", "<>": "!=" };
+
+/** An operator and a number, with room between them: `>$20`, `<= 1,000`, `≥ 5.50`. */
+const COMPARISON = String.raw`(>=|<=|=>|=<|==|!=|<>|[<>=≥≤≠])\s*\$?\s*(\d[\d,]*(?:\.\d*)?|\.\d+)(?![\w.])`;
+/** An operator on its own, as while typing one: nothing to look for yet. */
+const LONE_OP = /^(?:[<>=!]=?|[≥≤≠]|<>|=>|=<)$/;
+
+/** The amount comparison a term is, as `parseQuery` writes it: `>=20`. */
+export function comparison(term: string): { op: Op; value: number } | null {
+  const m = /^(>=|<=|!=|[<>=])(\d+(?:\.\d+)?)$/.exec(term);
+  return m ? { op: m[1] as Op, value: Number(m[2]) } : null;
+}
+
 export function parseQuery(query: string): string[] {
   const terms: string[] = [];
-  for (const m of query.matchAll(/"([^"]*)"?|(\S+)/g)) {
-    const term = fold((m[1] ?? m[2] ?? "").trim());
-    if (term) terms.push(term);
+  for (const m of query.matchAll(new RegExp(String.raw`${COMPARISON}|"([^"]*)"?|(\S+)`, "g"))) {
+    if (m[1] !== undefined) {
+      // Before folding, which would take ≠ apart.
+      terms.push(`${OP_ALIASES[m[1]] ?? m[1]}${Number(m[2]!.replaceAll(",", ""))}`);
+      continue;
+    }
+    const term = fold((m[3] ?? m[4] ?? "").trim());
+    if (term && !LONE_OP.test(term)) terms.push(term);
   }
   return terms;
+}
+
+/** Whether `amount`, in or out, passes the comparison: in cents, so 0.1 + 0.2 is 0.3. */
+function compares(amount: number, { op, value }: { op: Op; value: number }): boolean {
+  return OPS[op](Math.round(Math.abs(amount) * 100), Math.round(value * 100));
 }
 
 const WEEKDAY = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" });
@@ -83,6 +116,14 @@ interface Indexed<T> {
   /** Everything searchable, folded, one field per line. */
   haystack: string;
   hidden: HiddenField[];
+  amount: number | null;
+}
+
+/** Whether an item has the term; a list without amounts has nothing for `>20` to compare. */
+function matches(x: Indexed<unknown>, term: string): boolean {
+  const cmp = comparison(term);
+  if (cmp) return x.amount !== null && compares(x.amount, cmp);
+  return has(x.haystack, term);
 }
 
 /** A search over any list, as the transactions' works. */
@@ -90,11 +131,13 @@ export class Search<T> {
   private readonly index: Indexed<T>[];
   private readonly byItem = new Map<T, Indexed<T>>();
 
-  constructor(items: T[], describe: (item: T) => Searchable) {
+  /** `amount`, for items that have one, is what `>20` and the like compare. */
+  constructor(items: T[], describe: (item: T) => Searchable, amount?: (item: T) => number) {
     this.index = items.map((item) => {
       const { shown, hidden: all } = describe(item);
       const hidden = all.filter((f) => f.value);
-      const entry = { item, haystack: fold([...shown, ...hidden.map((f) => f.value)].join("\n")), hidden };
+      const haystack = fold([...shown, ...hidden.map((f) => f.value)].join("\n"));
+      const entry = { item, haystack, hidden, amount: amount ? amount(item) : null };
       this.byItem.set(item, entry);
       return entry;
     });
@@ -107,7 +150,7 @@ export class Search<T> {
   /** The items with every term, in list order. */
   filter(terms: string[]): T[] {
     if (terms.length === 0) return this.index.map((x) => x.item);
-    return this.index.filter((x) => terms.every((term) => has(x.haystack, term))).map((x) => x.item);
+    return this.index.filter((x) => terms.every((term) => matches(x, term))).map((x) => x.item);
   }
 
   /**
@@ -118,7 +161,7 @@ export class Search<T> {
     const entry = this.byItem.get(item);
     if (!entry) return [];
     const seen = fold(visible.join("\n"));
-    const missing = terms.filter((term) => !has(seen, term));
+    const missing = terms.filter((term) => !comparison(term) && !has(seen, term));
     return entry.hidden.filter((f) => missing.some((term) => has(fold(f.value), term)));
   }
 }
@@ -144,7 +187,7 @@ export class TxnSearch extends Search<TxnDto> {
         { label: "Website", value: t.website?.replace(/^https?:\/\/(www\.)?/, "") ?? "" },
         { label: "Plaid", value: t.plaidDetailed?.toLowerCase().replaceAll("_", " ") ?? "" },
       ],
-    }));
+    }), (t) => t.amount);
   }
 }
 
@@ -154,6 +197,7 @@ export function highlightParts(text: string, terms: string[]): Array<{ text: str
   const folded = fold(text);
   const marked = new Array<boolean>(text.length).fill(false);
   for (const term of terms) {
+    if (comparison(term)) continue;
     // Overlapping matches too: "aa" marks all of "aaa".
     const re = matcher(term);
     for (let m = re.exec(folded); m; m = re.exec(folded)) {
