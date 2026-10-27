@@ -11,7 +11,8 @@ import { snapshot, toDto, type TxnRow } from "./txns.js";
 
 /**
  * A person changes a transaction: its category (from now on `manual`: rules never touch it
- * again), its merchant (`manual` too), or both; and, optionally, saves a rule for the
+ * again), its merchant (`manual` too), or both; marks it as a gift or takes the mark off
+ * (`manual`: the gift rules leave it alone from then on); and, optionally, saves a rule for the
  * transactions like it at the same time. The decision is logged with a snapshot. All of it in
  * one database transaction; the write-through to the backend follows (see
  * SyncService.pushDirty).
@@ -33,6 +34,20 @@ export async function recategorize(
     // Parsed before anything changes, so a bad rule changes nothing.
     const rule = req.rule ? parseDefinition(req.rule.definition, categories) : null;
     if (req.merchantRule && req.categoryId === undefined) throw new HttpError(400, "a merchant rule needs a category");
+    if (req.gift === true && before.type === "transfer") throw new HttpError(400, "a transfer is not a gift");
+
+    if (req.gift !== undefined && (req.gift !== before.gift || before.gift_provenance !== "manual")) {
+      await client.query("UPDATE txn SET gift = $2, gift_provenance = 'manual' WHERE id = $1", [txnId, req.gift]);
+      if (req.gift !== before.gift) {
+        await appendDecision(client, {
+          actor,
+          action: req.gift ? "gift" : "ungift",
+          txnId,
+          txnSnapshot: snapshot(before),
+          uiContext: req.uiContext,
+        });
+      }
+    }
 
     if (req.categoryId !== undefined) {
       await client.query(

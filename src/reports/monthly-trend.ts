@@ -1,4 +1,5 @@
 import type { ReportRow } from "../shared/api.js";
+import { listMerchant, listMerchantKey } from "../shared/gift.js";
 import { sliceColor } from "./category-drilldown.js";
 import { sumRows } from "./run.js";
 import type { ReportDefinition, ReportTxn } from "./types.js";
@@ -56,7 +57,8 @@ const report: ReportDefinition = {
   levels: [
     { name: "Category", key: (t) => t.topId, rows: cells((t) => t.topId, (t) => t.topName) },
     { name: "Subcategory", key: (t) => t.leafId, rows: cells((t) => t.leafId, (t) => t.leafName) },
-    { name: "Merchant", key: (t) => t.merchantKey, rows: cells((t) => t.merchantKey, (t) => t.merchant) },
+    // Gifts are one "Gift", which gives none of them away.
+    { name: "Merchant", key: listMerchantKey, rows: cells(listMerchantKey, listMerchant) },
   ],
 
   link(key, ctx) {

@@ -19,6 +19,9 @@ import { backendSubject, merchantSettable, snapshot, toSubject, type TxnRow } fr
  * that. So a rule from the rules builder names an imported transaction, and a later "always
  * categorize <that merchant>" rule reaches it too. Rules never change a merchant set by hand
  * (`manual`), and after a sync leave one changed in the backend (`edited`) alone.
+ *
+ * Gift rules mark what they match as a gift: the app keeps its merchant out of lists, charts and
+ * search. A gift marked or unmarked by hand (`manual`) stays as it is.
  */
 export interface ActiveRule {
   id: number;
@@ -41,9 +44,17 @@ export async function loadActiveRules(db: Queryable): Promise<ActiveRule[]> {
   return out;
 }
 
+/** The active rule, or a 404. */
+async function findRule(db: Queryable, ruleId: number): Promise<ActiveRule> {
+  const found = (await loadActiveRules(db)).find((r) => r.id === ruleId);
+  if (!found) throw new HttpError(404, "no such rule");
+  return found;
+}
+
 /**
- * The active rules, newest first, with how many transactions each has set the category or the
- * merchant of (and still has: a person or a newer rule may have changed them since).
+ * The active rules, newest first, with how many transactions each has set the
+ * category or the merchant of, or marked as gifts (and still has: a person or a newer rule may
+ * have changed them since).
  */
 export async function listRules(db: Queryable): Promise<RuleDto[]> {
   const res = await db.query<{
@@ -55,6 +66,7 @@ export async function listRules(db: Queryable): Promise<RuleDto[]> {
     applied: number;
     categorized: number;
     named: number;
+    gifted: number;
   }>(
     `WITH hits AS (
        SELECT id, category_provenance AS provenance, 'category' AS what FROM txn
@@ -62,14 +74,19 @@ export async function listRules(db: Queryable): Promise<RuleDto[]> {
        UNION ALL
        SELECT id, merchant_provenance, 'merchant' FROM txn
        WHERE deleted_at IS NULL AND merchant_provenance LIKE 'rule:%' AND merchant IS NOT NULL
+       UNION ALL
+       SELECT id, gift_provenance, 'gift' FROM txn
+       WHERE deleted_at IS NULL AND gift_provenance LIKE 'rule:%' AND gift
      ), counts AS (
        SELECT substr(provenance, 6)::int AS rule_id, count(DISTINCT id)::int AS applied,
          count(*) FILTER (WHERE what = 'category')::int AS categorized,
-         count(*) FILTER (WHERE what = 'merchant')::int AS named
+         count(*) FILTER (WHERE what = 'merchant')::int AS named,
+         count(*) FILTER (WHERE what = 'gift')::int AS gifted
        FROM hits GROUP BY 1
      )
      SELECT r.id, v.version, v.definition, r.created_at, r.updated_at,
-       coalesce(c.applied, 0) AS applied, coalesce(c.categorized, 0) AS categorized, coalesce(c.named, 0) AS named
+       coalesce(c.applied, 0) AS applied, coalesce(c.categorized, 0) AS categorized, coalesce(c.named, 0) AS named,
+       coalesce(c.gifted, 0) AS gifted
      FROM rule r JOIN rule_version v ON v.rule_id = r.id AND v.version = r.current_version
      LEFT JOIN counts c ON c.rule_id = r.id
      WHERE r.deleted_at IS NULL ORDER BY r.id DESC`,
@@ -83,16 +100,20 @@ export async function listRules(db: Queryable): Promise<RuleDto[]> {
     applied: r.applied,
     categorized: r.categorized,
     named: r.named,
+    gifted: r.gifted,
   }));
 }
 
-/** The transactions an active rule has set the category or the merchant of, newest first. */
+/**
+ * The transactions an active rule has set the category or the merchant of, or marked as gifts,
+ * newest first.
+ */
 export async function ruleTransactions(db: Queryable, ruleId: number): Promise<TxnRow[]> {
-  const rule = await db.query("SELECT 1 FROM rule WHERE id = $1 AND deleted_at IS NULL", [ruleId]);
-  if (!rule.rows[0]) throw new HttpError(404, "no such rule");
+  await findRule(db, ruleId);
   const res = await db.query<TxnRow>(
     `SELECT * FROM txn
-     WHERE deleted_at IS NULL AND (category_provenance = $1 OR (merchant_provenance = $1 AND merchant IS NOT NULL))
+     WHERE deleted_at IS NULL
+       AND (category_provenance = $1 OR (merchant_provenance = $1 AND merchant IS NOT NULL) OR (gift_provenance = $1 AND gift))
      ORDER BY date DESC, id DESC`,
     [`rule:${ruleId}`],
   );
@@ -102,10 +123,12 @@ export async function ruleTransactions(db: Queryable, ruleId: number): Promise<T
 /**
  * Whether `rule` matches `row`. A rule that sets the merchant looks at the transaction as the
  * backend has it, so that filling in the merchant never changes what the rule matches, and
- * leaves transfers alone.
+ * leaves transfers alone. So does a gift rule: a transfer is not a purchase.
  */
 export function matches(rule: { definition: RuleDefinition }, row: TxnRow): boolean {
-  if (ruleActions(rule.definition).merchant === null) return evaluate(rule.definition.when, toSubject(row));
+  const actions = ruleActions(rule.definition);
+  if (actions.gift && row.type === "transfer") return false;
+  if (actions.merchant === null) return evaluate(rule.definition.when, toSubject(row));
   // A rule naming a merchant is about purchases and refunds; a transfer has no merchant.
   return row.type !== "transfer" && evaluate(rule.definition.when, backendSubject(row));
 }
@@ -124,6 +147,12 @@ export function categoryMatch(rules: ActiveRule[], row: TxnRow, categories: Cate
   });
 }
 
+/** The newest gift rule that matches, unless the gift was marked or unmarked by hand. */
+export function giftMatch(rules: ActiveRule[], row: TxnRow): ActiveRule | undefined {
+  if (row.gift_provenance === "manual") return undefined;
+  return rules.find((r) => ruleActions(r.definition).gift && matches(r, row));
+}
+
 export function parseDefinition(raw: unknown, categories: CategoryIndex): RuleDefinition {
   const parsed = ruleDefinitionSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(400, `invalid rule: ${parsed.error.issues[0]?.message ?? "bad definition"}`);
@@ -139,12 +168,14 @@ export interface BackfillCandidate {
   merchant: string | null;
   /** The category it would get, when that is a change. */
   categoryId: string | null;
+  /** Whether it would be marked as a gift. */
+  gift: boolean;
 }
 
 /**
  * Transactions a backfill of `definition` would change: matching, and either not yet with the
- * merchant it sets or not yet in the category it sets (never a merchant or a category set by
- * hand).
+ * merchant it sets or not yet in the category it sets, or not yet a gift (never a merchant, a
+ * category or a gift set by hand).
  */
 export async function backfillCandidates(
   db: Queryable,
@@ -155,10 +186,11 @@ export async function backfillCandidates(
   const res = await db.query<TxnRow>(
     `SELECT * FROM txn
      WHERE deleted_at IS NULL AND id <> $1
-       AND ((category_provenance <> 'manual' AND category_id IS DISTINCT FROM $2) OR $3::text IS NOT NULL)
+       AND ((category_provenance <> 'manual' AND category_id IS DISTINCT FROM $2) OR $3::text IS NOT NULL
+         OR ($4::boolean AND NOT gift AND gift_provenance <> 'manual'))
      ORDER BY date DESC, id DESC
      ${options.forUpdate ? "FOR UPDATE" : ""}`,
-    [options.excludeTxnId ?? -1, actions.categoryId, actions.merchant],
+    [options.excludeTxnId ?? -1, actions.categoryId, actions.merchant, actions.gift],
   );
   const out: BackfillCandidate[] = [];
   for (const row of res.rows) {
@@ -168,7 +200,8 @@ export async function backfillCandidates(
       actions.categoryId !== null && row.category_provenance !== "manual" && row.category_id !== actions.categoryId
         ? actions.categoryId
         : null;
-    if (merchant !== null || categoryId !== null) out.push({ row, merchant, categoryId });
+    const gift = actions.gift && !row.gift && row.gift_provenance !== "manual";
+    if (merchant !== null || categoryId !== null || gift) out.push({ row, merchant, categoryId, gift });
   }
   return out;
 }
@@ -211,6 +244,11 @@ async function setMerchantFromRule(
   return res.rows[0]!;
 }
 
+/** Marks a transaction as a gift from a rule. Nothing for the backend. */
+async function giftFromRule(db: Queryable, row: TxnRow, rule: { id: number }): Promise<void> {
+  await db.query("UPDATE txn SET gift = true, gift_provenance = $2 WHERE id = $1", [row.id, `rule:${rule.id}`]);
+}
+
 export async function backfill(
   db: Queryable,
   rule: { id: number; version: number; definition: RuleDefinition },
@@ -219,13 +257,14 @@ export async function backfill(
   const candidates = await backfillCandidates(db, rule.definition, { excludeTxnId: ctx.excludeTxnId, forUpdate: true });
   const newProvenance = `rule:${rule.id}`;
   const setsMerchant = ruleActions(rule.definition).merchant !== null;
-  for (const { row, merchant, categoryId } of candidates) {
+  for (const { row, merchant, categoryId, gift } of candidates) {
     // A new merchant with no category from this rule: the category rules get a look at it.
     if (merchant !== null) await setMerchantFromRule(db, row, rule, merchant, categoryId === null);
     if (categoryId !== null) await setFromRule(db, row, rule, categoryId, ctx.categories);
+    if (gift) await giftFromRule(db, row, rule);
     await appendDecision(db, {
       actor: ctx.actor,
-      action: "rule_backfill",
+      action: gift && merchant === null && categoryId === null ? "gift" : "rule_backfill",
       txnId: row.id,
       txnSnapshot: snapshot(row),
       oldCategoryId: row.category_id,
@@ -275,9 +314,7 @@ export async function saveRule(
       previous = same.definition;
     }
   } else {
-    const found = (await loadActiveRules(db)).find((r) => r.id === ruleId);
-    if (!found) throw new HttpError(404, "no such rule");
-    previous = found.definition;
+    previous = (await findRule(db, ruleId)).definition;
   }
 
   let version: number;
@@ -317,6 +354,8 @@ export async function saveRule(
     ruleDefinition: input.definition,
     uiContext: input.uiContext,
   });
+  // A gift rule's gifts follow what it matches now: dates moved, the ones left out are unmarked.
+  const unmarked = previous && ruleActions(previous).gift ? await ungiftUnmatched(db, { id: ruleId, version, definition: input.definition }, input) : 0;
   const backfilled = input.applyToPast
     ? await backfill(
         db,
@@ -326,12 +365,38 @@ export async function saveRule(
     : 0;
   // Merchants just set: the category rules have a look at them now, not at the next sync.
   if (backfilled > 0 && ruleActions(input.definition).merchant !== null) await applyRulesToPending(db, input.categories);
-  return { id: ruleId, version, action, backfilled };
+  return { id: ruleId, version, action, backfilled: backfilled + unmarked };
 }
 
+/** Unmarks the gifts a gift rule marked that its new version no longer matches. */
+async function ungiftUnmatched(
+  db: Queryable,
+  rule: { id: number; version: number; definition: RuleDefinition },
+  ctx: { actor: string; uiContext?: UiContext },
+): Promise<number> {
+  const marked = await db.query<TxnRow>("SELECT * FROM txn WHERE gift AND gift_provenance = $1 AND deleted_at IS NULL FOR UPDATE", [
+    `rule:${rule.id}`,
+  ]);
+  const gone = ruleActions(rule.definition).gift ? marked.rows.filter((row) => !matches(rule, row)) : marked.rows;
+  for (const row of gone) {
+    await db.query("UPDATE txn SET gift = false, gift_provenance = 'none' WHERE id = $1", [row.id]);
+    await appendDecision(db, {
+      actor: ctx.actor,
+      action: "ungift",
+      txnId: row.id,
+      txnSnapshot: snapshot(row),
+      ruleId: rule.id,
+      ruleVersion: rule.version,
+      ruleDefinition: rule.definition,
+      uiContext: ctx.uiContext,
+    });
+  }
+  return gone.length;
+}
+
+/** Deletes a rule. What it set stays, gifts too: deleting a gift rule gives nothing away. */
 export async function deleteRule(db: Queryable, ruleId: number, actor: string, uiContext?: UiContext): Promise<void> {
-  const rule = (await loadActiveRules(db)).find((r) => r.id === ruleId);
-  if (!rule) throw new HttpError(404, "no such rule");
+  const rule = await findRule(db, ruleId);
   await db.query("UPDATE rule SET deleted_at = now(), updated_at = now() WHERE id = $1", [ruleId]);
   await appendDecision(db, {
     actor,
@@ -365,7 +430,11 @@ export async function applyRulesToPending(db: Queryable, categories: CategoryInd
     const target = rule ? ruleActions(rule.definition).categoryId : null;
     const recategorized = rule && target !== null && (current.category_id !== target || current.category_provenance !== `rule:${rule.id}`);
     if (recategorized) await setFromRule(db, current, rule, target, categories);
-    if (current !== row || recategorized) changed += 1;
+    // A gift already marked stays as it was marked: another rule never takes it over.
+    const gift = current.gift ? undefined : giftMatch(rules, current);
+    const gifted = gift !== undefined;
+    if (gifted) await giftFromRule(db, current, gift);
+    if (current !== row || recategorized || gifted) changed += 1;
   }
   await db.query("UPDATE txn SET needs_rules = false WHERE needs_rules AND id = ANY($1)", [pending.rows.map((r) => r.id)]);
   return changed;

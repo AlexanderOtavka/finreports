@@ -128,3 +128,22 @@ describe("number terms", () => {
     ]);
   });
 });
+
+describe("searching gifts", () => {
+  const gift = txn(9, { merchant: "Tiffany & Co", description: "TIFFANY NYC 0042", notes: "her necklace", tags: ["anniversary"], amount: -480, gift: true } as Partial<TxnDto>);
+  const index = new TxnSearch([gift, txn(10, { merchant: "Tiffany Cafe", description: "TIFFANY CAFE" })], categories);
+  const ids = (q: string) => index.filter(parseQuery(q)).map((t) => t.id);
+
+  it("never finds a gift by what it hides", () => {
+    expect(ids("tiffany")).toEqual([10]);
+    expect(ids("necklace")).toEqual([]);
+    expect(ids("anniversary")).toEqual([]);
+    expect(ids("0042")).toEqual([]);
+  });
+
+  it("finds it by what the list shows: the date, the amount, the category, and gift", () => {
+    expect(ids("gift")).toEqual([9]);
+    expect(ids("480")).toEqual([9]);
+    expect(ids("coffee sep 14")).toEqual([9, 10]);
+  });
+});

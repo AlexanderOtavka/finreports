@@ -8,6 +8,7 @@ import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney, formatRange } from "../format.js";
 import { describePredicate, ruleTitle } from "../rules-text.js";
 import { Amount, confidenceLabel } from "./builder-parts.js";
+import { GiftIcon } from "./GiftSheet.js";
 import { useSheet } from "./sheet.js";
 
 /** What the sheet is about: one transaction (from a report), a rules builder group, or a rule. */
@@ -78,6 +79,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
  * - Rule: do the same for every transaction like it (by merchant or by description), with a
  *   live count of what it would change now. Always on for a group: the rule is the point.
  *
+ * - Gift: keep its merchant out of the lists, charts and search (it still shows here), or not.
+ *
  * For a rule already saved: what it sets (the merchant and the category, to change), what it
  * matches (as it is), and the transactions it has set; or delete it.
  */
@@ -109,6 +112,8 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [appliedLimit, setAppliedLimit] = useState(APPLIED_PAGE);
+  const [giftOn, setGiftOn] = useState(txn?.gift ?? false);
+  const giftChange = txn !== null && giftOn !== txn.gift;
   const sheet = useRef<HTMLDivElement>(null);
   useSheet(sheet, onClose);
 
@@ -199,7 +204,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
   }, [candidates, group, suggestions, categories]);
   const results = useMemo(() => categories.search(query), [categories, query]);
 
-  const nothingToDo = txn ? selected === null && !merchantChange && definition === null : proposed === null;
+  const nothingToDo = txn ? selected === null && !merchantChange && definition === null && !giftChange : proposed === null;
 
   // The sheet closes at once: the change is shown, and saved behind it. Without a count yet,
   // the past is changed if asked; with one of nothing, there is nothing to change.
@@ -209,6 +214,7 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
       onSave?.({
         ...(selected !== null ? { categoryId: selected } : {}),
         ...(merchantChange ? { merchant: newMerchant! } : {}),
+        ...(giftChange ? { gift: giftOn } : {}),
         ...(definition ? { rule: { definition, applyToPast: past } } : {}),
         uiContext: { ...uiContext, surface: "recategorize-sheet" },
       });
@@ -231,7 +237,11 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
         : "No changes"
       : nothingToDo
         ? "Pick a category, or rename"
-        : selected !== null && !merchantChange && !definition
+        : giftChange && selected === null && !merchantChange && !definition
+          ? giftOn
+            ? "Mark as a gift"
+            : "Not a gift"
+          : selected !== null && !merchantChange && !definition
           ? selected === txn!.categoryId
             ? `Confirm ${categories.name(selected)}`
             : `Move to ${categories.name(selected)}`
@@ -329,6 +339,14 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
           </div>
           {txn ? (
             <>
+              {txn.gift && (
+                <p className="sheet-gift-note" data-testid="gift-note">
+                  <span className="prov prov-gift">
+                    <GiftIcon /> Gift
+                  </span>{" "}
+                  Hidden from the lists and search. Keep the secret!
+                </p>
+              )}
               <p className="sheet-sub">
                 {formatDate(txn.date)}
                 {txn.accountName ? ` · ${txn.accountName}` : ""}
@@ -624,6 +642,22 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
             )}
           </section>
 
+          {txn && txn.type !== "transfer" && (
+            <section aria-labelledby="sheet-gift-label" className="sheet-gift">
+              <label className="toggle-row">
+                <span className="toggle-text">
+                  <span className="sheet-section" id="sheet-gift-label">
+                    Gift
+                  </span>
+                  <span className="sheet-hint">
+                    {giftOn ? "Merchant hidden from the lists, charts and search. It still counts." : "Hide the merchant from the lists, charts and search"}
+                  </span>
+                </span>
+                <input type="checkbox" role="switch" className="switch" checked={giftOn} onChange={(e) => setGiftOn(e.target.checked)} data-testid="gift-toggle" />
+              </label>
+            </section>
+          )}
+
           <section aria-labelledby="sheet-rule-label" className="sheet-rule">
             {txn ? (
               <label className="toggle-row">
@@ -717,10 +751,15 @@ export function RuleSheet({ subject, categories, uiContext, onClose, onSave, onS
                     <li key={x.id} data-testid="applied-txn">
                       <span className="sheet-txn-main">
                         <span className="sheet-txn-head">
-                          <strong>{x.merchant}</strong>
+                          {x.gift ? <strong className="gift-hidden">Merchant hidden</strong> : <strong>{x.merchant}</strong>}
                           <span className="muted"> · {categories.name(x.categoryId)}</span>
+                          {x.gift && (
+                            <span className="prov prov-gift">
+                              <GiftIcon /> Gift
+                            </span>
+                          )}
                         </span>
-                        <span className="mono">{x.description}</span>
+                        {!x.gift && <span className="mono">{x.description}</span>}
                         <span className="muted">
                           {formatDate(x.date)}
                           {x.accountName ? ` · ${x.accountName}` : ""}

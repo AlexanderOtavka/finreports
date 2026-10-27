@@ -1,8 +1,10 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { TxnDto } from "../../shared/api.js";
+import { listMerchant } from "../../shared/gift.js";
 import type { CategoryTree } from "../categories.js";
 import { formatDate, formatMoney } from "../format.js";
 import { parseQuery, TxnSearch } from "../search.js";
+import { GiftIcon } from "./GiftSheet.js";
 import { Hl, SearchIcon } from "./search-parts.js";
 
 interface Props {
@@ -190,7 +192,7 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
             const dateLabel = formatDate(t.date);
             const amount = `${inflow ? "+" : ""}${formatMoney(Math.abs(t.amount))}`;
             // A term found only in a field the row does not show: show that field.
-            const hits = filtering && index ? index.hiddenMatches(t, terms, [t.merchant, category, dateLabel, amount]) : [];
+            const hits = filtering && index ? index.hiddenMatches(t, terms, [listMerchant(t), category, dateLabel, amount]) : [];
             return (
               <li key={t.id} className={showDate ? "with-date" : undefined}>
                 {showDate && (
@@ -207,7 +209,13 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
                 >
                   <span className="txn-main">
                     <span className="txn-merchant">
-                      <Hl text={t.merchant} terms={terms} />
+                      {t.gift ? (
+                        <span className="gift-hidden" title="A gift: tap to see where it was bought">
+                          Merchant hidden
+                        </span>
+                      ) : (
+                        <Hl text={t.merchant} terms={terms} />
+                      )}
                     </span>
                     <span className="txn-meta">
                       <span className="txn-cat">
@@ -216,6 +224,11 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
                       {prov && (
                         <span className={`prov prov-${prov.text.toLowerCase()}`} title={prov.title}>
                           {prov.text}
+                        </span>
+                      )}
+                      {t.gift && (
+                        <span className="prov prov-gift" title="A gift: tap to see where it was bought" data-testid="gift-badge">
+                          <GiftIcon /> Gift
                         </span>
                       )}
                       {t.pending && <span className="prov prov-pending">Pending</span>}

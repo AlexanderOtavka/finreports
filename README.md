@@ -148,7 +148,7 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   alone; an explicit backfill, which a person asks for, does not. The newest matching rule wins.
 - Rules are data, so richer predicates are added in `src/shared/rules.ts` (schema + evaluator):
   `merchant`, `description`, `descriptionKey`, `account` (`equals`/`contains`), `amount`
-  (`min`/`max`), and `all`/`any`/`not`. Schema 1 rules set a category
+  (`min`/`max`), `date` (`from`/`to`, inclusive), and `all`/`any`/`not`. Schema 1 rules set a category
   (`"then": {"categoryId": …}`); schema 2 rules set a category, a merchant, or both
   (`"then": {"merchant": "Trader Joe's", "categoryId": …}`).
 - The rules builder's rules are schema 2:
@@ -178,6 +178,24 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
   it (what it set stays). Its match stays as it is. A rule made from a group flies down into
   the rules. `GET /api/rules/:id/transactions` lists what a rule has set, for other clients;
   the app works that out from the transactions it already has.
+- **Gifts** keep where something was bought out of sight, on the honor system (a shared login
+  is the usual case, so there is no per-person access). A gift still counts in every report,
+  with its date, amount, account and category, but the lists show "Merchant hidden" and a
+  **Gift** marker, the charts fold every gift into one "Gift" merchant, and search never
+  matches its merchant, description or details (`src/shared/gift.ts`, `TxnSearch`). Opening it
+  shows everything, marked as a gift. Gifts stay out of the rules builder's groups and
+  look-alikes.
+  - **Gift rules** mark a purchase ahead of time: "Gift rule" on the Rules tab takes a few
+    dates and, optionally, what the merchant or description contains
+    (`{"schema": 2, "when": {"all": [{"date": {"from": "2026-11-01", "to": "2026-11-15"}}, {"any": [{"merchant": {"contains": "etsy"}}, {"description": {"contains": "etsy"}}]}]}, "then": {"gift": true}}`).
+    It marks what is already in and, as they sync, the purchases that come in (never a transfer).
+    The Rules tab lists it only as "Gift rule" with its dates and whether it is active; what it
+    matches, its name and what it marked are in its sheet. Moving its dates unmarks what it no
+    longer matches; deleting it leaves its gifts as gifts.
+  - The **Gift** switch in a transaction's sheet marks it, or unmarks it, by hand (`manual`):
+    the gift rules leave it as it is from then on. A posted transaction keeps the mark of its
+    pending one. The log records `gift` and `ungift` events. Nothing about gifts goes to the
+    backend.
 - Changes are shown at once and saved behind the screen (`src/web/ledger.ts`): the app keeps
   what the server last said and the changes still on their way, and shows the one with the
   other on top. The changes go to the server one at a time, in order (a rule made a moment ago

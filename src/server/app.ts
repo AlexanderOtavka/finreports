@@ -38,12 +38,13 @@ const recategorizeBody = z
   .object({
     categoryId: z.string().min(1).max(200).optional(),
     merchant: z.string().trim().min(1).max(200).optional(),
+    gift: z.boolean().optional(),
     rule: z.object({ definition: z.unknown(), applyToPast: z.boolean() }).strict().optional(),
     uiContext,
     merchantRule: z.object({ applyToPast: z.boolean() }).strict().optional(),
   })
   .strict()
-  .refine((b) => b.categoryId !== undefined || b.merchant !== undefined || b.rule !== undefined, "nothing to change");
+  .refine((b) => b.categoryId !== undefined || b.merchant !== undefined || b.gift !== undefined || b.rule !== undefined, "nothing to change");
 const ruleBody = z.object({ definition: z.unknown(), applyToPast: z.boolean().default(false), uiContext }).strict();
 const previewBody = z.object({ definition: z.unknown(), excludeTxnId: z.number().int().optional() }).strict();
 const categoryBody = z.object({ name: z.string().min(1).max(80), parentId: z.string().max(200).nullable().default(null) }).strict();
@@ -185,6 +186,7 @@ export async function buildApp({ config, db, adapter, sync }: AppDeps): Promise<
       count: candidates.length,
       merchantCount: candidates.filter((c) => c.merchant !== null).length,
       categoryCount: candidates.filter((c) => c.categoryId !== null).length,
+      giftCount: candidates.filter((c) => c.gift).length,
       sample: candidates.slice(0, 5).map((c) => toDto(c.row)),
     } satisfies RulePreviewCounts;
   });

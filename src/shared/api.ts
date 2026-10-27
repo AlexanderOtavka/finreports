@@ -39,6 +39,13 @@ export interface TxnDto {
    * backend's import (`backend`), someone changing it there (`edited`), `manual`, or `rule:<id>`.
    */
   merchantSource: string;
+  /**
+   * A gift: the app keeps its merchant, description and details out of lists, charts and search
+   * (the honor system: opening it shows them).
+   */
+  gift: boolean;
+  /** Where `gift` comes from: `none`, `manual` (marked, or the mark taken off, by hand) or `rule:<id>`. */
+  giftSource: string;
 }
 
 /** An account transactions move money in or out of (an asset account, in Firefly's terms). */
@@ -84,6 +91,8 @@ export interface RecategorizeRequest {
   categoryId?: string;
   /** Its merchant, from now on `manual`. */
   merchant?: string;
+  /** Mark it as a gift (its merchant hidden), or take the mark off (only whoever marked it). */
+  gift?: boolean;
   /** A rule to save at the same time (and, with `applyToPast`, apply to past transactions). */
   rule?: { definition: unknown; applyToPast: boolean };
   uiContext?: UiContext;
@@ -111,6 +120,8 @@ export interface RuleDto {
   applied: number;
   categorized: number;
   named: number;
+  /** Marked as gifts. */
+  gifted: number;
 }
 
 /** A link to another app, shown in the top bar (`NAV_LINKS`). */
@@ -144,6 +155,8 @@ export interface RulePreviewCounts extends RulePreview {
   merchantCount: number;
   /** Of `count`, how many would get the rule's category. */
   categoryCount: number;
+  /** Of `count`, how many it would mark as gifts. */
+  giftCount: number;
 }
 
 /** A transaction as the rules builder shows it. */

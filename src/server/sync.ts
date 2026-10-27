@@ -229,7 +229,16 @@ export class SyncService {
           fields.tags,
         ],
       );
-      existing.set(b.externalId, res.rows[0]!);
+      let inserted = res.rows[0]!;
+      // And its gift: marked (by hand or by a rule whose dates it may have just left), or unmarked by hand.
+      if (replaced && (replaced.gift || replaced.gift_provenance === "manual")) {
+        const gifted = await client.query<TxnRow>(
+          "UPDATE txn SET gift = $2, gift_provenance = $3 WHERE id = $1 RETURNING *",
+          [inserted.id, replaced.gift, replaced.gift_provenance],
+        );
+        inserted = gifted.rows[0]!;
+      }
+      existing.set(b.externalId, inserted);
       return "inserted";
     }
 
