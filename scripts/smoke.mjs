@@ -637,8 +637,10 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     await page.getByTestId("report-monthly-trend").click();
     await page.getByTestId("ranked-row").first().waitFor();
     assert(accountsParam() === "jordan,sam", "a report tab keeps the accounts");
-    await page.getByTestId("range-90d").click();
-    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "90d");
+    // Whole months here: 3 of them instead of 90 days.
+    assert((await page.getByTestId("range-90d").count()) === 0, "no 90 days in the monthly report");
+    await page.getByTestId("range-3m").click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("range") === "3m");
     assert(accountsParam() === "jordan,sam", "a range keeps the accounts");
     await page.getByTestId("ranked-row").first().click();
     await page.waitForFunction(() => new URL(location.href).searchParams.has("p"));

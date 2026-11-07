@@ -1,3 +1,4 @@
+import type { BarSeriesOption } from "echarts";
 import type { ReportRow } from "../shared/api.js";
 import { listMerchant, listMerchantKey } from "../shared/gift.js";
 import { sliceColor } from "./category-drilldown.js";
@@ -10,9 +11,13 @@ import type { ReportDefinition, ReportTxn } from "./types.js";
  * subcategories instead, and a subcategory for its merchants, as the donut drills; tap a
  * merchant to pick it out. Tap a month to open the category report for that month, at the same
  * drill path.
+ *
+ * This month's bar is only so far; a dashed outline on top of it shows where it is headed: what
+ * a typical month still spends after this day of it (`projection.ts`).
  */
 const MONTH = /^\d{4}-\d{2}$/;
 const OTHER_SERIES = "Other";
+const PROJECTION_SERIES = "__projection__";
 
 /** One row per month and series (category, subcategory or merchant); the list sums them per series. */
 interface Cell extends ReportRow {
@@ -43,6 +48,10 @@ function monthsBetween(first: string, last: string): string[] {
   return out;
 }
 
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;
+/** The y axis's "4k", and the projection's "4.2k". */
+const axisMoney = (v: number) => (v >= 1000 ? `$${(Math.round(v / 100) / 10).toString()}k` : `$${Math.round(v)}`);
+
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const report: ReportDefinition = {
@@ -50,6 +59,9 @@ const report: ReportDefinition = {
   title: "Monthly spending",
   shortTitle: "Monthly",
   defaultRange: "12m",
+  // Whole months: 3 of them, not 90 days that start partway through the first.
+  ranges: ["30d", "3m", "6m", "12m", "ytd"],
+  projectsMonth: true,
   description: "Spending per month, stacked by category. Tap a category to stack its subcategories, a month to break it down.",
   rootLabel: "All spending",
   baseFilter: (t) => t.spend !== 0,
@@ -91,7 +103,10 @@ const report: ReportDefinition = {
 
   chart(data, theme, selectedKey) {
     const rows = data.rows as Cell[];
-    const months = rows.length ? monthsBetween(rows[0]!.month, rows[rows.length - 1]!.month) : [];
+    const projection = data.projection ?? null;
+    // This month has a column for its projection even before anything is spent in it.
+    const last = [rows.at(-1)?.month, projection?.month].filter((m) => m !== undefined).sort().at(-1);
+    const months = rows.length && last ? monthsBetween(rows[0]!.month, last) : [];
     const monthIndex = new Map(months.map((m, i) => [m, i]));
 
     // One series per row of the list with a color, biggest at the bottom (the list's order); the
@@ -121,9 +136,11 @@ const report: ReportDefinition = {
     // A merchant picked out at the last level: the others fade.
     const picked = selectedKey && byKey.has(selectedKey) ? (series.find((s) => s.id === selectedKey) ?? null) : null;
 
-    // Only the top segment of each bar gets rounded corners.
-    const topSeries = months.map((_, m) => series.reduce((top, s, i) => (s.values[m]! > 0 ? i : top), -1));
     const monthTotals = months.map((_, m) => series.reduce((sum, s) => sum + s.values[m]!, 0));
+    const projected = projection && monthIndex.has(projection.month) && projection.remaining > 0 ? monthIndex.get(projection.month)! : -1;
+    // Only the top segment of each bar gets rounded corners: the projection's, on this month's.
+    const topSeries = months.map((_, m) => (m === projected ? -1 : series.reduce((top, s, i) => (s.values[m]! > 0 ? i : top), -1)));
+    const dayName = (day: number) => `${MONTH_NAMES[Number(projection!.month.slice(5)) - 1]} ${day}`;
     const axisLabel = (key: string, i: number) => {
       const [y, m] = key.split("-") as [string, string];
       const name = MONTH_NAMES[Number(m) - 1]!;
@@ -138,12 +155,20 @@ const report: ReportDefinition = {
         confine: true,
         axisPointer: { type: "shadow", shadowStyle: { color: theme.dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" } },
         formatter: (p: unknown) => {
-          const items = (p as Array<{ dataIndex: number; seriesName: string; value: number; color: string }>)
-            .filter((it) => it.value > 0)
-            .sort((a, b) => b.value - a.value);
-          const m = items[0]?.dataIndex ?? 0;
+          const all = p as Array<{ dataIndex: number; seriesId: string; seriesName: string; value: number; color: string }>;
+          const items = all.filter((it) => it.value > 0 && it.seriesId !== PROJECTION_SERIES).sort((a, b) => b.value - a.value);
+          const m = all[0]?.dataIndex ?? 0;
           const [y, mm] = months[m]!.split("-") as [string, string];
-          const head = `${MONTH_NAMES[Number(mm) - 1]} ${y} · <b>${theme.formatMoney(monthTotals[m]!)}</b>`;
+          let head = `${MONTH_NAMES[Number(mm) - 1]} ${y} · <b>${theme.formatMoney(monthTotals[m]!)}</b>`;
+          if (m === projected) {
+            const p = projection!;
+            head +=
+              ` through ${dayName(p.day)}<br/>` +
+              `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;border:1px dashed ${theme.textMuted}"></span>` +
+              `≈ <b>${theme.formatMoney(monthTotals[m]! + p.remaining)}</b> by ${dayName(p.daysInMonth)}<br/>` +
+              `<span style="opacity:0.75">+${theme.formatMoney(p.remaining)}: the average after the ${ordinal(p.day)},<br/>` +
+              `${p.history.length === 1 ? "last month" : `over the last ${p.history.length} months`}</span>`;
+          }
           const lines = items.map(
             (it) =>
               `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${it.color}"></span>${it.seriesName} ${theme.formatMoney(it.value)}`,
@@ -163,27 +188,62 @@ const report: ReportDefinition = {
         type: "value",
         axisLabel: {
           color: theme.textMuted,
-          formatter: (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`),
+          // 1.5k, not a second "2k".
+          formatter: (v: number) => (v >= 1000 ? `${v / 1000}k` : `${v}`),
         },
         splitLine: { lineStyle: { color: theme.grid } },
       },
       // A series keeps its id from one range or set of accounts to the next, so its bars grow
       // and shrink to the new values; a drill stacks new series, drawn fresh.
-      series: series.map((s, i) => ({
-        id: s.id,
-        type: "bar",
-        name: s.name,
-        stack: "spend",
-        barMaxWidth: 28,
-        barCategoryGap: "30%",
-        itemStyle: { color: s.color, borderColor: theme.surface, borderWidth: 1, opacity: picked && picked !== s ? 0.25 : 1 },
-        emphasis: { focus: "none" },
-        data: s.values.map((value, m) => ({
-          value,
-          key: months[m],
-          itemStyle: topSeries[m] === i ? { borderRadius: [4, 4, 0, 0] } : undefined,
-        })),
-      })),
+      series: [
+        ...series.map(
+          (s, i): BarSeriesOption => ({
+            id: s.id,
+            type: "bar",
+            name: s.name,
+            stack: "spend",
+            barMaxWidth: 28,
+            barCategoryGap: "30%",
+            itemStyle: { color: s.color, borderColor: theme.surface, borderWidth: 1, opacity: picked && picked !== s ? 0.25 : 1 },
+            emphasis: { focus: "none" },
+            data: s.values.map((value, m) => ({
+              value,
+              key: months[m],
+              itemStyle: topSeries[m] === i ? { borderRadius: [4, 4, 0, 0] } : undefined,
+            })),
+          }),
+        ),
+        // This month's projection, on top: an outline up to where the month is headed.
+        ...(projected < 0
+          ? []
+          : [
+              {
+                id: PROJECTION_SERIES,
+                type: "bar",
+                name: "Projected",
+                stack: "spend",
+                barMaxWidth: 28,
+                barCategoryGap: "30%",
+                itemStyle: {
+                  color: theme.dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  borderColor: theme.textMuted,
+                  borderType: "dashed",
+                  borderWidth: 1.5,
+                  borderRadius: [4, 4, 0, 0],
+                },
+                emphasis: { disabled: true },
+                label: {
+                  show: true,
+                  position: "top",
+                  color: theme.textMuted,
+                  fontSize: 10,
+                  formatter: () => `≈${axisMoney(monthTotals[projected]! + projection!.remaining)}`,
+                },
+                // Only this month's column has one ("-" is no bar, not a bar of 0).
+                data: months.map((key, m) => (m === projected ? { value: projection!.remaining, key } : "-")),
+              } satisfies BarSeriesOption,
+            ]),
+      ],
     };
   },
 };

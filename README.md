@@ -13,7 +13,10 @@ Tap a slice of the spending donut to drill into its subcategories, then a subcat
 merchants. The monthly report stacks each month's bar by category and drills the same way:
 tap a category under the chart to stack the bars by its subcategories over the same months
 (groceries against restaurants), then a subcategory for its merchants. Tap a month to open the
-donut for just that month, at the same drill path. The transactions behind the selection scroll below the chart. Tap
+donut for just that month, at the same drill path. This month's bar is only so far, so a dashed outline on top of it shows where it is
+headed: what is spent so far, plus what the twelve months before spent, on average, after this
+day of the month. The rent paid on the 1st is not projected again, and a big week does not
+set the pace for the rest of the month. Its ranges are whole months (3M instead of 90 days). The transactions behind the selection scroll below the chart. Tap
 one to recategorize it, or to "always categorize" that merchant: a rule, previewed against
 past transactions and optionally applied to them.
 

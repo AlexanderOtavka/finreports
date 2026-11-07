@@ -37,6 +37,7 @@ export function today(): string {
 export const RANGE_LABELS: Record<RangePreset, string> = {
   "30d": "30D",
   "90d": "90D",
+  "3m": "3M",
   "6m": "6M",
   "12m": "1Y",
   ytd: "YTD",
@@ -45,6 +46,7 @@ export const RANGE_LABELS: Record<RangePreset, string> = {
 export const RANGE_TITLES: Record<RangePreset, string> = {
   "30d": "Last 30 days",
   "90d": "Last 90 days",
+  "3m": "This month and the two before",
   "6m": "This month and the five before",
   "12m": "This month and the eleven before",
   ytd: "Since January 1",
@@ -60,6 +62,8 @@ export function presetRange(preset: RangePreset, end = today()): { from: string;
       return { from: daysBack(29), to: end };
     case "90d":
       return { from: daysBack(89), to: end };
+    case "3m":
+      return { from: monthsBack(2), to: end };
     case "6m":
       return { from: monthsBack(5), to: end };
     case "12m":
