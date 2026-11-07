@@ -29,6 +29,8 @@ const report: ReportDefinition = {
   id: "spending-by-category",
   title: "Spending by category",
   shortTitle: "Categories",
+  // 30 and 90 days, to compare like with like.
+  ranges: ["30d", "90d", "6m", "12m", "ytd"],
   defaultRange: "30d",
   description: "Where the money went, by category, subcategory and merchant. Refunds net against spending.",
   rootLabel: "All spending",

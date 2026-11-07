@@ -75,6 +75,23 @@ export interface ReportData {
   breadcrumbs: Breadcrumb[];
   rows: ReportRow[];
   total: number;
+  /** Where this month is headed, for a report that projects it (`projection.ts`). */
+  projection?: MonthProjection | null;
+}
+
+/** This month so far, and what a typical month still spends after this day of it. */
+export interface MonthProjection {
+  /** "2026-11". */
+  month: string;
+  /** Today's day of the month, and the month's length. */
+  day: number;
+  daysInMonth: number;
+  /** Spent this month through today. */
+  spent: number;
+  /** The average, over `history`, of what a month spent after `day`. */
+  remaining: number;
+  /** The complete months before this one: spent through `day`, and in all. */
+  history: Array<{ month: string; through: number; total: number }>;
 }
 
 export interface UiContext {

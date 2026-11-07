@@ -3,7 +3,8 @@
  * report, range, accounts or drill path, from the same list of every transaction, so the chart
  * and the list under it always describe the same selection.
  */
-import type { Breadcrumb, CategoryDto, ReportData, ReportRow, TxnDto } from "../shared/api.js";
+import type { Breadcrumb, CategoryDto, MonthProjection, ReportData, ReportRow, TxnDto } from "../shared/api.js";
+import { PROJECTION_MONTHS, projectMonth } from "./projection.js";
 import type { ReportContext, ReportDefinition, ReportTxn } from "./types.js";
 
 /** `txn` with its category's place in the tree and its spending. */
@@ -67,6 +68,34 @@ export function runReport(report: ReportDefinition, scoped: ReportTxn[], drillPa
     rows,
     total: Math.round(rows.reduce((sum, r) => sum + r.value, 0) * 100) / 100,
   };
+}
+
+/**
+ * Where the month of `today` is headed (`projection.ts`), for a report that projects it and a
+ * range that runs from at least the 1st through today: over every transaction in `all` the
+ * chart would count at the drill path, from the months before the range too. Null otherwise.
+ */
+export function projection(report: ReportDefinition, all: ReportTxn[], ctx: ReportContext, today: string): MonthProjection | null {
+  const monthStart = `${today.slice(0, 8)}01`;
+  if (!report.projectsMonth || ctx.from > monthStart || ctx.to < today) return null;
+  const [y, m] = today.split("-").map(Number) as [number, number];
+  const from = new Date(Date.UTC(y, m - 1 - PROJECTION_MONTHS, 1)).toISOString().slice(0, 10);
+  const counted = inScope(report, all, { ...ctx, from: "0000-01-01", to: today });
+  if (!counted.length) return null;
+  const path = normalizePath(report, ctx.path);
+  const level = Math.min(path.length, report.levels.length - 1);
+  const scoped = under(report, counted.filter((t) => t.date >= from), path, level);
+  // Where the data starts: a month before that has nothing to go on. That is where the last of
+  // the accounts in use (with spending in those months) starts, so a month before the checking
+  // account was connected, which has the cards but not the rent, does not count; unless that
+  // leaves fewer than 3 months (a new card), and then wherever any data starts.
+  const first = new Map<string | null, string>();
+  for (const t of counted) if (t.date < (first.get(t.accountId) ?? "9999")) first.set(t.accountId, t.date);
+  const inUse = new Set(counted.filter((t) => t.date >= from).map((t) => t.accountId));
+  const allStart = [...first.values()].reduce((a, b) => (a < b ? a : b));
+  const lastStart = [...inUse].map((a) => first.get(a)!).reduce((a, b) => (a > b ? a : b), allStart);
+  const withAll = projectMonth(scoped, today, lastStart);
+  return withAll && withAll.history.length >= 3 ? withAll : projectMonth(scoped, today, allStart);
 }
 
 /** The transactions behind the drill path, over `scoped` (from `inScope`), newest first. */

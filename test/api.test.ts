@@ -2,7 +2,7 @@ import { gunzipSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
 import { findReport } from "../src/reports/index.js";
 import monthlyTrend from "../src/reports/monthly-trend.js";
-import { inScope, runReport, selection, toReportTxn } from "../src/reports/run.js";
+import { inScope, projection, runReport, selection, toReportTxn } from "../src/reports/run.js";
 import type { ReportContext, ReportTxn } from "../src/reports/types.js";
 import { SampleAdapter } from "../src/server/adapters/sample.js";
 import { buildApp } from "../src/server/app.js";
@@ -221,6 +221,29 @@ describe("API (sample backend, dev auth bypass)", async () => {
     const path = ["food-and-drink", "food-and-drink.restaurant", merchant.key];
     expect((await run("monthly-trend", { path })).breadcrumbs.at(-1)!.label).toBe(merchant.label);
     expect((await listed("monthly-trend", { path })).every((t) => t.merchantKey === merchant.key)).toBe(true);
+  });
+
+  it("projects this month from the months before it, in the same accounts and drill path", async () => {
+    const all = await allTxns();
+    const ctx = { from: "2026-07-01", to: "2026-09-12", path: [] };
+    const p = projection(monthlyTrend, all, ctx, "2026-09-12")!;
+    expect(p).toMatchObject({ month: "2026-09", day: 12, daysInMonth: 30 });
+    // A year before, but from October: September 2025 has only the old card's statements, and
+    // none of the accounts connected in October (the rent).
+    expect(p.history.map((h) => h.month)).toEqual(["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"]);
+    // So far is this month's bar.
+    const bar = (await run("monthly-trend", ctx)).rows.filter((r) => (r as ReportRow & { month: string }).month === "2026-09");
+    expect(p.spent).toBeCloseTo(bar.reduce((sum, r) => sum + r.value, 0), 0);
+    // A range that misses the 1st or today has none, and nor does the category report.
+    expect(projection(monthlyTrend, all, { ...ctx, from: "2026-09-02" }, "2026-09-12")).toBeNull();
+    expect(projection(monthlyTrend, all, { ...ctx, to: "2026-09-11" }, "2026-09-12")).toBeNull();
+    expect(projection(findReport("spending-by-category")!, all, ctx, "2026-09-12")).toBeNull();
+    // Drilled into a category, or in one account, the projection is of that.
+    const food = projection(monthlyTrend, all, { ...ctx, path: ["food-and-drink"] }, "2026-09-12")!;
+    expect(food.spent).toBeLessThan(p.spent);
+    expect(food.remaining).toBeLessThan(p.remaining);
+    const jordan = projection(monthlyTrend, all, { ...ctx, accounts: ["jordan"] }, "2026-09-12")!;
+    expect(jordan.spent).toBeLessThan(p.spent);
   });
 
   it("links a month to the category report for that month, clipped to the range, at the same drill path", () => {

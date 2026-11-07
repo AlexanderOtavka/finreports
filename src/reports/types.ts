@@ -78,7 +78,7 @@ export interface ReportLink {
   path: string[];
 }
 
-export type RangePreset = "30d" | "90d" | "6m" | "12m" | "ytd";
+export type RangePreset = "30d" | "90d" | "3m" | "6m" | "12m" | "ytd";
 
 export interface ReportDefinition {
   id: string;
@@ -87,6 +87,13 @@ export interface ReportDefinition {
   shortTitle: string;
   /** Date range the report opens with. */
   defaultRange: RangePreset;
+  /** The presets in the range bar, in order. */
+  ranges: RangePreset[];
+  /**
+   * Whether the chart shows where this month is headed: `data.projection`, while the range
+   * runs from at least the 1st of this month through today.
+   */
+  projectsMonth?: boolean;
   description: string;
   /** Breadcrumb label of the top level. */
   rootLabel: string;

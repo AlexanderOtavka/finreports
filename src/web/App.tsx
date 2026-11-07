@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OTHER_KEY } from "../reports/category-drilldown.js";
 import { findReport, REPORTS } from "../reports/index.js";
-import { inScope, runReport, selection, toReportTxn } from "../reports/run.js";
+import { inScope, projection, runReport, selection, toReportTxn } from "../reports/run.js";
 import type { RangePreset } from "../reports/types.js";
 import type { AccountDto, RecategorizeRequest, TxnDto, UiContext } from "../shared/api.js";
 import { withGift } from "../shared/gift.js";
@@ -52,7 +52,9 @@ function readUrl(): ViewState {
   const range = params.get("range");
   const from = valid(params.get("from"));
   const to = valid(params.get("to"));
-  const dates = isPreset(range) ? presetView(range) : from && to ? { range: null, from, to } : presetView(report.defaultRange);
+  // A preset the report does not offer (90 days, from the category report, on the monthly one)
+  // opens the report's own.
+  const dates = isPreset(range) && report.ranges.includes(range) ? presetView(range) : from && to ? { range: null, from, to } : presetView(report.defaultRange);
   return {
     reportId: report.id,
     ...dates,
@@ -318,7 +320,8 @@ export function App() {
   const { data, listTxns } = useMemo(() => {
     if (!reportTxns) return { data: null, listTxns: [] };
     const scoped = inScope(report, reportTxns, view);
-    return { data: runReport(report, scoped, view.path), listTxns: selection(report, scoped, view.path) };
+    const data = { ...runReport(report, scoped, view.path), projection: projection(report, reportTxns, view, today()) };
+    return { data, listTxns: selection(report, scoped, view.path) };
   }, [report, reportTxns, view]);
 
   useEffect(() => {
@@ -690,7 +693,7 @@ export function App() {
       <>
       <AccountFilter accounts={accounts} selected={view.accounts} onChange={(next) => navigate({ ...view, accounts: next }, false)}>
       <div className="range-bar" role="group" aria-label="Date range">
-        {(Object.keys(RANGE_LABELS) as RangePreset[]).map((p) => (
+        {report.ranges.map((p) => (
           <button
             key={p}
             type="button"
