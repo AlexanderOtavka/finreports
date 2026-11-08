@@ -380,7 +380,7 @@ read-only against PostgreSQL, and on `main` publishes
 `ghcr.io/alexanderotavka/finreports:sha-<commit>` and `:latest`. Pin the digest it prints
 in the run summary.
 
-[Renovate](https://docs.renovatebot.com) (`renovate.json`) updates dependencies on Monday
+[Renovate](https://docs.renovatebot.com) (`renovate.json`) updates dependencies on Saturday
 mornings (UTC): `flake.lock`, npm packages, and the GitHub Actions. Minor and patch updates
 come as one PR, lock file refreshes as another, and each major upgrade as its own. Every one
 merges itself once CI passes, and the merge publishes a new image; one CI fails on stays open
