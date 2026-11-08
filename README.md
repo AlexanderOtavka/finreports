@@ -380,11 +380,12 @@ read-only against PostgreSQL, and on `main` publishes
 `ghcr.io/alexanderotavka/finreports:sha-<commit>` and `:latest`. Pin the digest it prints
 in the run summary.
 
-`.github/workflows/update.yml` runs weekly: `nix flake update`, then `npm update` within the
-ranges in `package.json`. It opens a PR on `automated/update-deps`, runs CI there, and CI
-merges it once everything passes and publishes a new image. The Nix build reads
+[Renovate](https://docs.renovatebot.com) (`renovate.json`) updates dependencies on Monday
+mornings (UTC): `flake.lock`, npm packages, and the GitHub Actions. Minor and patch updates
+come as one PR and lock file refreshes as another; each merges itself once CI passes, and
+the merge publishes a new image. npm updates move `package-lock.json` within the ranges in
+`package.json`. Major upgrades get a PR of their own, left to a person. The Nix build reads
 `package-lock.json` directly (`importNpmLock`), so there is no dependency hash to refresh.
-Dependabot keeps the GitHub Actions up to date.
 
 ## License
 
