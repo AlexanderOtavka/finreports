@@ -382,9 +382,10 @@ in the run summary.
 
 [Renovate](https://docs.renovatebot.com) (`renovate.json`) updates dependencies on Monday
 mornings (UTC): `flake.lock`, npm packages, and the GitHub Actions. Minor and patch updates
-come as one PR and lock file refreshes as another; each merges itself once CI passes, and
-the merge publishes a new image. npm updates move `package-lock.json` within the ranges in
-`package.json`. Major upgrades get a PR of their own, left to a person. The Nix build reads
+come as one PR, lock file refreshes as another, and each major upgrade as its own. Every one
+merges itself once CI passes, and the merge publishes a new image; one CI fails on stays open
+for a person. npm updates move `package-lock.json` within the ranges in `package.json`, and
+majors bump the range. The Nix build reads
 `package-lock.json` directly (`importNpmLock`), so there is no dependency hash to refresh.
 
 ## License
