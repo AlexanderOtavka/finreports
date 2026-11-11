@@ -15,7 +15,7 @@ import { RuleSheet } from "./components/RuleSheet.js";
 import { RulesBuilder } from "./components/RulesBuilder.js";
 import { TxnList } from "./components/TxnList.js";
 import { applyRule, fillGroups, upsertRule, useLedger, type Change, type LedgerState } from "./ledger.js";
-import { formatMoneyShort, formatRange, formatSyncTime, isPreset, presetRange, RANGE_LABELS, RANGE_TITLES, today } from "./format.js";
+import { formatMoneyShort, formatRange, dataAsOf, formatSyncTime, isPreset, presetRange, rangeAsOf, RANGE_LABELS, RANGE_TITLES } from "./format.js";
 import { clearSnapshot, loadSnapshot, saveSnapshot, type Snapshot } from "./store.js";
 import { useUpdateReady } from "./sw-client.js";
 import { ruleTitle } from "./rules-text.js";
@@ -131,7 +131,7 @@ export function App() {
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fatal, setFatal] = useState<string | null>(null);
-  const [view, setView] = useState<ViewState>(readUrl);
+  const [urlView, setView] = useState<ViewState>(readUrl);
   const [builderError, setBuilderError] = useState<string | null>(null);
   /** When the data on screen came from the server, and how it stands now. */
   const [sync, setSync] = useState<{ state: SyncState; fetchedAt: number | null }>({ state: "updating", fetchedAt: null });
@@ -146,6 +146,12 @@ export function App() {
   const dark = useDarkMode();
   const updateReady = useUpdateReady();
   const [updateDismissed, setUpdateDismissed] = useState(false);
+
+  // A preset ends on the day of the data on screen, not today: data kept on this device (opened
+  // offline, or before the refresh comes back) knows nothing after it was fetched, so a range
+  // through today would end in days it has not loaded, short. The server's answer moves it on.
+  const asOf = dataAsOf(sync.fetchedAt);
+  const view = useMemo(() => rangeAsOf(urlView, asOf), [urlView, asOf]);
 
   const report = findReport(view.reportId) ?? REPORTS[0]!;
   const onBuilder = view.reportId === BUILDER;
@@ -320,9 +326,9 @@ export function App() {
   const { data, listTxns } = useMemo(() => {
     if (!reportTxns) return { data: null, listTxns: [] };
     const scoped = inScope(report, reportTxns, view);
-    const data = { ...runReport(report, scoped, view.path), projection: projection(report, reportTxns, view, today()) };
+    const data = { ...runReport(report, scoped, view.path), projection: projection(report, reportTxns, view, asOf) };
     return { data, listTxns: selection(report, scoped, view.path) };
-  }, [report, reportTxns, view]);
+  }, [report, reportTxns, view, asOf]);
 
   useEffect(() => {
     if (!toast) return;
@@ -737,7 +743,7 @@ export function App() {
               type="date"
               value={view.to}
               min={view.from}
-              max={today()}
+              max={asOf}
               onChange={(e) => e.target.value && navigate({ ...view, range: null, to: e.target.value, path: [] }, false)}
             />
           </label>

@@ -27,11 +27,14 @@ export function formatRange(from: string, to: string): string {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-/** Today in the browser's zone, as an ISO date. */
-export function today(): string {
-  const d = new Date();
+/** The day of `ms` (ms since the epoch) in the browser's zone, as an ISO date. */
+export function localDate(ms: number): string {
+  const d = new Date(ms);
   return iso(new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())));
 }
+
+/** Today in the browser's zone, as an ISO date. */
+export const today = (): string => localDate(Date.now());
 
 /** Short, so all of them and "Custom" fit across a phone. */
 export const RANGE_LABELS: Record<RangePreset, string> = {
@@ -71,6 +74,17 @@ export function presetRange(preset: RangePreset, end = today()): { from: string;
     case "ytd":
       return { from: `${e.getUTCFullYear()}-01-01`, to: end };
   }
+}
+
+/**
+ * The day the data on screen runs through: the day it was fetched (ms since the epoch), or
+ * today before any has arrived.
+ */
+export const dataAsOf = (fetchedAt: number | null): string => (fetchedAt ? localDate(fetchedAt) : today());
+
+/** A preset's dates, ending on `asOf` rather than today; a custom range as it is. */
+export function rangeAsOf<V extends { range: RangePreset | null; from: string; to: string }>(view: V, asOf: string): V {
+  return view.range ? { ...view, ...presetRange(view.range, asOf) } : view;
 }
 
 export const isPreset = (v: string | null): v is RangePreset => v !== null && Object.hasOwn(RANGE_LABELS, v);
