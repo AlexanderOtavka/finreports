@@ -16,6 +16,7 @@
       ../vite.config.ts
       ../vitest.config.ts
       ../migrations
+      ../public
       ../scripts
       ../src
       ../test

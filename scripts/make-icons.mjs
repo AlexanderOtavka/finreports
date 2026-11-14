@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Draws the app icon (a donut chart on a dark tile) as PNGs for the web app manifest.
 // No image libraries: a tiny PNG encoder over node:zlib. Run with `npm run icons`; the
-// output is committed under src/web/public/icons/.
+// output is committed under public/icons/.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 
-const out = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "web", "public", "icons");
+const out = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "icons");
 mkdirSync(out, { recursive: true });
 
 const BG = [0x14, 0x1b, 0x2d];
