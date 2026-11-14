@@ -40,7 +40,7 @@ function serviceWorker(): Plugin {
 export default defineConfig({
   root: "src/web",
   base: "/reports/",
-  publicDir: "public",
+  publicDir: "../../public",
   plugins: [react(), serviceWorker()],
   build: {
     outDir: "../../dist/web",
