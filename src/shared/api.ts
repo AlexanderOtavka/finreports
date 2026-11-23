@@ -32,8 +32,8 @@ export interface TxnDto {
   notes: string | null;
   tags: string[];
   categoryId: string | null;
-  /** `plaid`, `backend`, `manual`, `rule:<id>`, or `none`. */
-  provenance: string;
+  /** `plaid`, `backend`, `manual` or `rule:<id>`; null when there is no category. */
+  provenance: string | null;
   /**
    * Where `merchant` comes from: `none` (there is none; it is the cleaned description), the
    * backend's import (`backend`), someone changing it there (`edited`), `manual`, or `rule:<id>`.
@@ -189,7 +189,7 @@ export interface BuilderTxnDto {
   merchant: string | null;
   accountName: string | null;
   categoryId: string | null;
-  provenance: string;
+  provenance: string | null;
 }
 
 /**

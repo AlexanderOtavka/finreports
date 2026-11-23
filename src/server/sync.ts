@@ -154,10 +154,9 @@ export class SyncService {
     existing: Map<string, TxnRow>,
     categories: CategoryIndex,
   ): Promise<"inserted" | "updated" | "unchanged"> {
-    const fromBackend = {
-      categoryId: b.categoryFromPlaid ? categories.idForPlaid(b.plaid) : categories.idForName(b.category),
-      provenance: b.category === null ? "none" : b.categoryFromPlaid ? "plaid" : "backend",
-    };
+    const categoryId = b.categoryFromPlaid ? categories.idForPlaid(b.plaid) : categories.idForName(b.category);
+    // No source for no category, even when the backend has one that maps to none of ours.
+    const fromBackend = { categoryId, provenance: categoryId === null ? null : b.categoryFromPlaid ? "plaid" : "backend" };
     const fields = {
       group_id: b.groupId,
       date: b.date,
@@ -184,7 +183,7 @@ export class SyncService {
       let category = { id: fromBackend.categoryId, provenance: fromBackend.provenance, dirty: false, needsRules: true };
       // A posted transaction inherits the decision made on its pending authorization.
       const replaced = b.replacesExternalId ? existing.get(b.replacesExternalId) : undefined;
-      if (replaced && (replaced.category_provenance === "manual" || replaced.category_provenance.startsWith("rule:"))) {
+      if (replaced && (replaced.category_provenance === "manual" || replaced.category_provenance?.startsWith("rule:"))) {
         category = {
           id: replaced.category_id,
           provenance: replaced.category_provenance,

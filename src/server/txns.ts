@@ -29,7 +29,8 @@ export interface TxnRow {
   tags: string[];
   backend_category: string | null;
   category_id: string | null;
-  category_provenance: string;
+  /** `plaid`, `backend`, `manual` or `rule:<id>`; null exactly when there is no category. */
+  category_provenance: string | null;
   category_set_at: Date | null;
   backend_dirty: boolean;
   needs_rules: boolean;

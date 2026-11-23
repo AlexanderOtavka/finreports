@@ -206,7 +206,7 @@ export function ruleCounts(txns: TxnDto[] | null): Map<number, RuleCount> {
     return c;
   };
   for (const t of txns ?? []) {
-    const cat = t.provenance.startsWith("rule:") ? Number(t.provenance.slice(5)) : null;
+    const cat = t.provenance?.startsWith("rule:") ? Number(t.provenance.slice(5)) : null;
     const mer = t.merchantSource.startsWith("rule:") ? Number(t.merchantSource.slice(5)) : null;
     if (cat !== null) at(cat).categorized += 1;
     if (mer !== null) at(mer).named += 1;

@@ -117,7 +117,7 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
     const out = new Map<number, TxnDto[]>();
     const add = (id: number, t: TxnDto) => (out.get(id) ?? out.set(id, []).get(id)!).push(t);
     for (const t of txns ?? []) {
-      const cat = t.provenance.startsWith("rule:") ? Number(t.provenance.slice(5)) : null;
+      const cat = t.provenance?.startsWith("rule:") ? Number(t.provenance.slice(5)) : null;
       const mer = t.merchantSource.startsWith("rule:") ? Number(t.merchantSource.slice(5)) : null;
       if (cat !== null) add(cat, t);
       if (mer !== null && mer !== cat) add(mer, t);

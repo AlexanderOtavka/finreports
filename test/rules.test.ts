@@ -247,7 +247,7 @@ describe("rules that set the merchant", async () => {
         merchantKey(merchant, f.description),
         f.description,
         f.category ?? null,
-        f.provenance ?? "none",
+        f.provenance ?? (f.category ? "plaid" : null),
         f.needsRules ?? false,
         f.merchantProvenance ?? "backend",
       ],

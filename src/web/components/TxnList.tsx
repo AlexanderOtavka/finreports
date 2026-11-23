@@ -23,7 +23,8 @@ interface Props {
   onOpen(txn: TxnDto): void;
 }
 
-function provenanceLabel(p: string): { text: string; title: string } | null {
+function provenanceLabel(p: string | null): { text: string; title: string } | null {
+  if (p === null) return null; // Uncategorized
   if (p === "manual") return { text: "You", title: "Categorized by you" };
   if (p.startsWith("rule:")) return { text: "Rule", title: `Categorized by rule #${p.slice(5)}` };
   if (p === "backend") return { text: "Ledger", title: "Categorized in the ledger" };

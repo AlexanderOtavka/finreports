@@ -186,7 +186,7 @@ export async function backfillCandidates(
   const res = await db.query<TxnRow>(
     `SELECT * FROM txn
      WHERE deleted_at IS NULL AND id <> $1
-       AND ((category_provenance <> 'manual' AND category_id IS DISTINCT FROM $2) OR $3::text IS NOT NULL
+       AND ((category_provenance IS DISTINCT FROM 'manual' AND category_id IS DISTINCT FROM $2) OR $3::text IS NOT NULL
          OR ($4::boolean AND gift_source IS NULL))
      ORDER BY date DESC, id DESC
      ${options.forUpdate ? "FOR UPDATE" : ""}`,

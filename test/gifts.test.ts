@@ -83,10 +83,10 @@ describe("gifts", async () => {
   });
 
   it("leaves gifts out of the rules builder's groups and look-alikes", async () => {
-    await db.query("UPDATE txn SET category_id = NULL WHERE id = $1", [inside]);
+    await db.query("UPDATE txn SET category_id = NULL, category_provenance = NULL WHERE id = $1", [inside]);
     const all = (await db.query<TxnRow>("SELECT * FROM txn")).rows;
     expect(JSON.stringify(buildGroups(all))).not.toContain("5678");
-    await db.query("UPDATE txn SET category_id = 'general-merchandise.other-general-merchandise' WHERE id = $1", [inside]);
+    await db.query("UPDATE txn SET category_id = 'general-merchandise.other-general-merchandise', category_provenance = 'plaid' WHERE id = $1", [inside]);
   });
 
   it("marks new transactions in its dates as they sync, and not the ones outside", async () => {
