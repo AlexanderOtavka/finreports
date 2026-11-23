@@ -141,9 +141,9 @@ export function applyRule(txns: TxnDto[], id: number, definition: RuleDefinition
   let changed = false;
   const out = txns.map((t) => {
     if (then.gift) {
-      if (t.gift || t.giftSource === "manual" || t.type === "transfer" || !evaluate(definition.when, subject(t))) return t;
+      if (t.giftSource !== null || t.type === "transfer" || !evaluate(definition.when, subject(t))) return t;
       changed = true;
-      return withGift(t, true, source);
+      return withGift(t, source);
     }
     if (!evaluate(definition.when, subject(t))) return t;
     let next = t;
@@ -212,7 +212,7 @@ export function ruleCounts(txns: TxnDto[] | null): Map<number, RuleCount> {
     if (mer !== null) at(mer).named += 1;
     if (cat !== null) at(cat).applied += 1;
     if (mer !== null && mer !== cat) at(mer).applied += 1;
-    const gift = t.gift && t.giftSource.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
+    const gift = t.giftSource?.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
     if (gift !== null) {
       at(gift).gifted += 1;
       if (gift !== cat && gift !== mer) at(gift).applied += 1;

@@ -4,8 +4,11 @@ import { afterAll, inject } from "vitest";
 import { seedCategories } from "../src/server/categories.js";
 import { createPool, migrate, type Db } from "../src/server/db.js";
 
-/** A new, migrated, seeded database for this test file; dropped afterwards. */
-export async function freshDb(options: { seed?: boolean } = {}): Promise<Db> {
+/**
+ * A new, migrated, seeded database for this test file; dropped afterwards. `migrations` migrates
+ * from another directory instead (to stop part way, say).
+ */
+export async function freshDb(options: { seed?: boolean; migrations?: string } = {}): Promise<Db> {
   const adminUrl = inject("pgAdminUrl");
   const name = `t_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -15,7 +18,7 @@ export async function freshDb(options: { seed?: boolean } = {}): Promise<Db> {
   const url = new URL(adminUrl);
   url.pathname = `/${name}`;
   const db = createPool(url.toString(), {});
-  await migrate(db);
+  await migrate(db, options.migrations);
   if (options.seed !== false) await seedCategories(db);
   afterAll(async () => {
     await db.end();

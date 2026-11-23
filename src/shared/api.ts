@@ -44,8 +44,11 @@ export interface TxnDto {
    * (the honor system: opening it shows them).
    */
   gift: boolean;
-  /** Where `gift` comes from: `none`, `manual` (marked, or the mark taken off, by hand) or `rule:<id>`. */
-  giftSource: string;
+  /**
+   * Where `gift` comes from: null (nothing marked it), `manual` (marked by hand), `manual:off`
+   * (the mark taken off by hand) or `rule:<id>`.
+   */
+  giftSource: string | null;
 }
 
 /** An account transactions move money in or out of (an asset account, in Firefly's terms). */

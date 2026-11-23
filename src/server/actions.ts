@@ -36,8 +36,9 @@ export async function recategorize(
     if (req.merchantRule && req.categoryId === undefined) throw new HttpError(400, "a merchant rule needs a category");
     if (req.gift === true && before.type === "transfer") throw new HttpError(400, "a transfer is not a gift");
 
-    if (req.gift !== undefined && (req.gift !== before.gift || before.gift_provenance !== "manual")) {
-      await client.query("UPDATE txn SET gift = $2, gift_provenance = 'manual' WHERE id = $1", [txnId, req.gift]);
+    const giftSource = req.gift === undefined ? undefined : req.gift ? "manual" : "manual:off";
+    if (giftSource !== undefined && giftSource !== before.gift_source) {
+      await client.query("UPDATE txn SET gift_source = $2 WHERE id = $1", [txnId, giftSource]);
       if (req.gift !== before.gift) {
         await appendDecision(client, {
           actor,

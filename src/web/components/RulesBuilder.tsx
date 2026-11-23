@@ -121,7 +121,7 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
       const mer = t.merchantSource.startsWith("rule:") ? Number(t.merchantSource.slice(5)) : null;
       if (cat !== null) add(cat, t);
       if (mer !== null && mer !== cat) add(mer, t);
-      const gift = t.gift && t.giftSource.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
+      const gift = t.giftSource?.startsWith("rule:") ? Number(t.giftSource.slice(5)) : null;
       if (gift !== null && gift !== cat && gift !== mer) add(gift, t);
     }
     return out;

@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { migrate } from "../src/server/db.js";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { appRoot, migrate } from "../src/server/db.js";
 import { appendDecision } from "../src/server/decisions.js";
 import { taxonomySeed } from "../src/shared/taxonomy.js";
 import { freshDb } from "./helpers.js";
@@ -78,4 +81,57 @@ describe("migrations", async () => {
       { external_id: "e", top_id: "uncategorized", leaf_id: "uncategorized", spend: 7 },
     ]);
   });
+});
+
+describe("migrating flags to their sources", async () => {
+  // Up to just before the gifts got a source, so the rows can be in the states it replaces.
+  const dir = mkdtempSync(join(tmpdir(), "finreports-migrations-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const all = readdirSync(join(appRoot(), "migrations")).filter((f) => f.endsWith(".sql")).sort();
+  const copy = (files: string[]) => files.forEach((f) => copyFileSync(join(appRoot(), "migrations", f), join(dir, f)));
+  copy(all.filter((f) => f < "008"));
+  const db = await freshDb({ migrations: dir });
+
+  const insert = (id: string, gift: boolean, provenance: string) =>
+    db.query(
+      `INSERT INTO txn (backend, external_id, date, amount, type, merchant_key, description, gift, gift_provenance)
+       VALUES ('t', $1, '2026-01-01', -1, 'withdrawal', 'k', 'd', $2, $3)`,
+      [id, gift, provenance],
+    );
+
+  it("gives every gift a source, keeping what is marked marked", async () => {
+    await appendDecision(db, { actor: "test", action: "gift", txnSnapshot: { gift: true, giftProvenance: "manual" } });
+    await insert("none", false, "none");
+    await insert("manual", true, "manual");
+    await insert("manual-off", false, "manual");
+    await insert("rule", true, "rule:7");
+    // Neither can be stored any more: a gift from nowhere, and a rule's mark that marks nothing.
+    await insert("gift-from-nowhere", true, "none");
+    await insert("rule-not-gift", false, "rule:7");
+    copy(all.filter((f) => f >= "008"));
+    expect(await migrate(db, dir)).toEqual(all.filter((f) => f >= "008"));
+
+    const rows = await db.query("SELECT external_id, gift, gift_source FROM txn ORDER BY id");
+    expect(rows.rows).toEqual([
+      { external_id: "none", gift: false, gift_source: null },
+      { external_id: "manual", gift: true, gift_source: "manual" },
+      { external_id: "manual-off", gift: false, gift_source: "manual:off" },
+      { external_id: "rule", gift: true, gift_source: "rule:7" },
+      { external_id: "gift-from-nowhere", gift: true, gift_source: "manual" },
+      { external_id: "rule-not-gift", gift: false, gift_source: null },
+    ]);
+    // The log is as it was.
+    const events = await db.query("SELECT schema_version, txn_snapshot FROM decision_event");
+    expect(events.rows).toEqual([{ schema_version: 2, txn_snapshot: { gift: true, giftProvenance: "manual" } }]);
+  });
+
+  it("derives gift and merchant_dirty, and refuses to store them", async () => {
+    await expect(db.query("UPDATE txn SET gift = true")).rejects.toThrow(/can only be updated to DEFAULT/);
+    await expect(db.query("UPDATE txn SET merchant_dirty = true")).rejects.toThrow(/can only be updated to DEFAULT/);
+    await expect(db.query("UPDATE txn SET gift_source = 'none'")).rejects.toThrow(/check constraint/);
+    await db.query("UPDATE txn SET merchant = 'Y', backend_merchant = 'X' WHERE external_id = 'none'");
+    const dirty = await db.query("SELECT merchant_dirty FROM txn WHERE external_id = 'none'");
+    expect(dirty.rows).toEqual([{ merchant_dirty: true }]);
+  });
+
 });
