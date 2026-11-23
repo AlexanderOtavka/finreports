@@ -134,4 +134,12 @@ describe("migrating flags to their sources", async () => {
     expect(dirty.rows).toEqual([{ merchant_dirty: true }]);
   });
 
+  it("only writes a category chosen here, and one that exists", async () => {
+    await expect(db.query("UPDATE txn SET backend_dirty = true, category_id = 'food-and-drink.coffee', category_provenance = 'plaid' WHERE external_id = 'none'")).rejects.toThrow(
+      /txn_backend_dirty_provenance_check/,
+    );
+    await expect(
+      db.query("UPDATE txn SET backend_dirty = true, category_provenance = 'manual', category_id = NULL WHERE external_id = 'none'"),
+    ).rejects.toThrow(/txn_backend_dirty_category_check/);
+  });
 });
