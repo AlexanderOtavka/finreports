@@ -236,8 +236,7 @@ async function setMerchantFromRule(
   needsRules: boolean,
 ): Promise<TxnRow> {
   const res = await db.query<TxnRow>(
-    `UPDATE txn SET merchant = $2, merchant_key = $3, merchant_provenance = $4,
-       merchant_dirty = ($2::text IS DISTINCT FROM backend_merchant), needs_rules = $5
+    `UPDATE txn SET merchant = $2, merchant_key = $3, merchant_provenance = $4, needs_rules = $5
      WHERE id = $1 RETURNING *`,
     [row.id, merchant, merchantKey(merchant, row.description), `rule:${rule.id}`, needsRules],
   );

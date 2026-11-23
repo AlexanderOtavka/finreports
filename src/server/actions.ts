@@ -60,8 +60,7 @@ export async function recategorize(
     if (merchant !== undefined) {
       // With no category chosen, the category rules get a look at the new merchant.
       await client.query(
-        `UPDATE txn SET merchant = $2, merchant_key = $3, merchant_provenance = 'manual',
-           merchant_dirty = ($2::text IS DISTINCT FROM backend_merchant), needs_rules = needs_rules OR $4
+        `UPDATE txn SET merchant = $2, merchant_key = $3, merchant_provenance = 'manual', needs_rules = needs_rules OR $4
          WHERE id = $1`,
         [txnId, merchant, merchantKey(merchant, before.description), req.categoryId === undefined],
       );

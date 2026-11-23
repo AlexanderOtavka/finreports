@@ -271,8 +271,7 @@ export class SyncService {
          merchant_key=$9, description=$10, account_id=$11, account_name=$12, counterparty=$13,
          plaid_primary=$14, plaid_detailed=$15, backend_updated_at=$16, synced_at=now(), deleted_at=NULL,
          needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22, backend_merchant=$23,
-         merchant_provenance=CASE WHEN $24 THEN 'edited' ELSE merchant_provenance END,
-         merchant_dirty=(merchant_dirty AND $23::text IS DISTINCT FROM $8::text)
+         merchant_provenance=CASE WHEN $24 THEN 'edited' ELSE merchant_provenance END
          ${backendRecategorized ? ", backend_category=$25, category_id=$26, category_provenance=$27, category_set_at=now()" : ""}
        WHERE id=$1`,
       [
@@ -331,7 +330,7 @@ export class SyncService {
     for (const row of merchants.rows) {
       try {
         await this.adapter.setMerchant(row.external_id, row.merchant);
-        await this.db.query("UPDATE txn SET merchant_dirty = false, backend_merchant = $2 WHERE id = $1 AND merchant = $2", [
+        await this.db.query("UPDATE txn SET backend_merchant = $2 WHERE id = $1 AND merchant = $2", [
           row.id,
           row.merchant,
         ]);

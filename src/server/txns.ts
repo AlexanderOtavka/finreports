@@ -41,6 +41,7 @@ export interface TxnRow {
   backend_merchant: string | null;
   /** `backend`, `edited`, `manual` or `rule:<id>`. */
   merchant_provenance: string;
+  /** Generated: `merchant` differs from `backend_merchant`, so the sync loop writes it through. */
   merchant_dirty: boolean;
   /** Marked as a gift: the app keeps its merchant out of lists, charts and search. */
   gift: boolean;
