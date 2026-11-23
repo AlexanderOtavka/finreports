@@ -26,6 +26,12 @@
   --info: #00c0ef;
   --label-default: #d2d6de;
   --label-default-ink: #444444;
+  /* The markers' outlines and text (`.prov`): dark enough to read on a white row. */
+  --prov-neutral: #6b6b6b;
+  --prov-you: #2f7bab;
+  --prov-rule: #00809f;
+  --prov-pending: #b35c00;
+  --prov-gift: #c2185b;
   --error: #dd4b39;
   --navbar: #3c8dbc;
   --logo: #367fa9;
@@ -71,6 +77,11 @@
     --transfer: #72afd2;
     --label-default: #454b51;
     --label-default-ink: #bfc4ca;
+    --prov-neutral: #a4aab0;
+    --prov-you: #72afd2;
+    --prov-rule: #4fc8e8;
+    --prov-pending: #f0a43a;
+    --prov-gift: #f06292;
     --error: #e0756a;
     --navbar: #282c30;
     --logo: #282c30;
@@ -839,7 +850,8 @@ a {
 .txn {
   width: 100%;
   display: flex;
-  align-items: center;
+  /* The amount top right, on the merchant's line, whether markers follow it or not. */
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
   background: none;
@@ -874,7 +886,7 @@ a {
 }
 .txn-meta {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--text-3);
@@ -885,31 +897,69 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Bootstrap labels. */
-.prov {
+/* The amount, and under it what the transaction is (pending, recurring). */
+.txn-side {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+}
+.txn-marks {
+  display: flex;
+  gap: 0.25rem;
+}
+.txn-marks:empty {
+  display: none;
+}
+/*
+ * A marker: a small outlined label, its border and text in the kind's colour (`--prov`), set by
+ * a modifier class per kind (`.prov-you`, `.prov-rule`…). Unmodified, it is gray.
+ */
+.prov {
+  --prov: var(--prov-neutral);
+  flex: none;
+  /* Inline-block, not flex: in a sentence it then sits on the text's baseline, not the icon's. */
+  display: inline-block;
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
+  border: 1px solid var(--prov);
   border-radius: 0.25em;
-  padding: 0.25em 0.55em 0.3em;
-  background: var(--label-default);
-  color: var(--label-default-ink);
+  padding: 0.2em 0.45em 0.25em;
+  background: none;
+  color: var(--prov);
+}
+/* Where it can, the padding is measured from the capitals, so it is even above and below. */
+@supports (text-box: trim-both cap alphabetic) {
+  .prov {
+    text-box: trim-both cap alphabetic;
+    padding: 0.32em 0.45em;
+  }
 }
 .prov-you {
-  background: var(--accent);
-  color: #fff;
+  --prov: var(--prov-you);
 }
 .prov-rule {
-  background: var(--info);
-  color: #fff;
+  --prov: var(--prov-rule);
 }
 .prov-pending {
-  background: var(--warning);
-  color: #fff;
+  --prov: var(--prov-pending);
+}
+.prov-gift {
+  --prov: var(--prov-gift);
+}
+/*
+ * An icon in a marker: its drawing as tall as a capital and level with one, from the baseline to
+ * the cap height (measured on the gift icon).
+ */
+.prov svg {
+  width: 1.03em;
+  height: 1.03em;
+  vertical-align: -0.1em;
 }
 .txn-amount {
-  flex: none;
   font-variant-numeric: tabular-nums;
 }
 .outflow {
@@ -1057,9 +1107,17 @@ a {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* A tag from the ledger: a value, not a marker, so a filled Bootstrap label. */
 .sheet-tag {
   display: inline-block;
   margin-right: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 0.25em;
+  padding: 0.25em 0.55em 0.3em;
+  background: var(--label-default);
+  color: var(--label-default-ink);
 }
 .sheet-amount {
   font-size: 1.1rem;
@@ -1578,12 +1636,6 @@ a {
 .builder-group-tags:empty {
   display: none;
 }
-.prov-missing {
-  background: var(--surface-2);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  font-weight: 600;
-}
 .builder-match {
   display: flex;
   flex-wrap: wrap;
@@ -1785,18 +1837,6 @@ a {
 
 /* --- Gifts: a hidden merchant, marked ------------------------------------------------------ */
 
-/* AdminLTE's maroon label. */
-.prov-gift {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25em;
-  background: #d81b60;
-  color: #fff;
-}
-.prov-gift .gift-icon {
-  width: 0.95em;
-  height: 0.95em;
-}
 .gift-icon {
   vertical-align: -0.1em;
 }

@@ -222,16 +222,15 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
                         <Hl text={category} terms={terms} />
                       </span>
                       {prov && (
-                        <span className={`prov prov-${prov.text.toLowerCase()}`} title={prov.title}>
+                        <span className={`prov prov-${prov.text.toLowerCase()}`} title={prov.title} data-marker={prov.text.toLowerCase()}>
                           {prov.text}
                         </span>
                       )}
                       {t.gift && (
-                        <span className="prov prov-gift" title="A gift: tap to see where it was bought" data-testid="gift-badge">
+                        <span className="prov prov-gift" title="A gift: tap to see where it was bought" data-testid="gift-badge" data-marker="gift">
                           <GiftIcon /> Gift
                         </span>
                       )}
-                      {t.pending && <span className="prov prov-pending">Pending</span>}
                     </span>
                     {hits.map((f) => (
                       <span key={f.label} className="txn-hit" data-testid="txn-hit">
@@ -239,8 +238,18 @@ export function TxnList({ items, loading, categories, flash, search, scope, onSe
                       </span>
                     ))}
                   </span>
-                  <span className={`txn-amount ${flow}`}>
-                    <Hl text={amount} terms={terms} />
+                  <span className="txn-side">
+                    <span className={`txn-amount ${flow}`}>
+                      <Hl text={amount} terms={terms} />
+                    </span>
+                    {/* Pending (and recurring) under the amount; who categorized it, and Gift, by the category. */}
+                    <span className="txn-marks">
+                      {t.pending && (
+                        <span className="prov prov-pending" data-marker="pending">
+                          Pending
+                        </span>
+                      )}
+                    </span>
                   </span>
                 </button>
               </li>

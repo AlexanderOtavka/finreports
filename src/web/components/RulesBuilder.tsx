@@ -405,8 +405,8 @@ export function RulesBuilder({ categories, txns, rules, builder, error, onRetry,
                         {g.descriptions.length > 1 && <span className="muted"> · +{g.descriptions.length - 1} more</span>}
                       </span>
                       <span className="builder-group-tags">
-                        {g.missingMerchant > 0 && <span className="prov prov-missing">No merchant{g.missingMerchant < g.size ? ` ${g.missingMerchant}` : ""}</span>}
-                        {g.missingCategory > 0 && <span className="prov prov-missing">No category{g.missingCategory < g.size ? ` ${g.missingCategory}` : ""}</span>}
+                        {g.missingMerchant > 0 && <span className="prov">No merchant{g.missingMerchant < g.size ? ` ${g.missingMerchant}` : ""}</span>}
+                        {g.missingCategory > 0 && <span className="prov">No category{g.missingCategory < g.size ? ` ${g.missingCategory}` : ""}</span>}
                       </span>
                       {best ? (
                         <span className="builder-match" data-testid="builder-match">

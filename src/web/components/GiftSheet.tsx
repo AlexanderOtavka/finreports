@@ -97,7 +97,9 @@ export function GiftSheet({ rule, categories, applied, onClose, onSave, onDelete
           </div>
           <p className="sheet-sub">
             Hides the merchant of a purchase in these dates from the lists, charts and search. It still counts, marked{" "}
-            <span className="prov prov-gift">Gift</span>
+            <span className="prov prov-gift">
+              <GiftIcon /> Gift
+            </span>
           </p>
           <p className="sheet-sub">The Rules tab shows only its dates. What it matches stays in here.</p>
           <button type="button" className="sheet-close" onClick={onClose} aria-label="Close">
