@@ -760,6 +760,62 @@ async function runFlow(name, { safeArea, ...options }, chromiumPath, pg) {
     refusing = false;
     await page.getByTestId("rules-search-close").click();
     await page.getByTestId("builder-filter-all").click();
+
+    // 12d. The markers on a transaction: by you, by a rule, pending, a gift. A gift rule for the
+    //      newest posted restaurant meal (its sheet names the Gift marker), then a recent grocery
+    //      run moved to Restaurants by hand; Food and Drink over 30 days then lists all four, in
+    //      light and in dark.
+    const api = async (path) => (await page.request.get(`${server.base}/reports/api/${path}`)).json();
+    const [allTxns, allCategories] = await Promise.all([api("transactions"), api("categories")]);
+    const catId = (name) => allCategories.find((c) => c.name === name)?.id;
+    const lastDay = allTxns.reduce((m, t) => (t.date > m ? t.date : m), "");
+    const since = new Date(Date.parse(lastDay) - 20 * 86_400_000).toISOString().slice(0, 10);
+    const recent = allTxns.filter((t) => !t.pending && t.date >= since).sort((a, b) => b.date.localeCompare(a.date));
+    const meal = recent.find((t) => t.categoryId === catId("Restaurants") && t.provenance === "plaid" && t.merchant && t.merchant !== "Uber Eats");
+    const grocery = recent.find((t) => t.categoryId === catId("Groceries") && t.provenance !== "manual");
+    assert(meal && grocery, "a recent meal and a recent grocery run");
+    await page.getByTestId("toast").waitFor({ state: "detached" });
+    await page.getByTestId("gift-new").click();
+    await page.getByTestId("gift-sheet").waitFor();
+    await page.getByTestId("gift-from").fill(meal.date);
+    await page.getByTestId("gift-to").fill(meal.date);
+    await page.getByTestId("gift-contains").fill(meal.merchant);
+    await page.getByTestId("preview-count").waitFor();
+    await shot("gift-sheet");
+    await page.getByTestId("gift-save").click();
+    await page.getByTestId("gift-sheet").waitFor({ state: "detached" });
+    await page.locator("[data-testid=rule-item]", { hasText: "Gift" }).first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(2500); // the counts come with the server's answer
+    await page.getByTestId("toast").waitFor({ state: "detached" });
+    await shot("rules-gift");
+    await page.goto(`${server.base}/reports/?r=spending-by-category&range=30d&p=food-and-drink`);
+    const groceryRow = page.locator(`[data-testid=txn][data-txn-id="${grocery.id}"]`);
+    await groceryRow.click();
+    await page.getByTestId("sheet").waitFor();
+    await page.getByTestId("category-search").fill("restaur");
+    await page.locator('[data-testid=sheet] .tree [data-category-id="food-and-drink.restaurant"]').click();
+    await page.getByTestId("save").click();
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
+    await groceryRow.filter({ hasText: "Restaurants" }).waitFor();
+    const markersIn = async (want) => {
+      for (const kind of want) await page.locator(`[data-testid=txn] [data-marker="${kind}"]`).first().waitFor();
+    };
+    // Restaurants alone brings all four kinds near the top.
+    await page.getByTestId("txn-search-open").click();
+    await page.getByTestId("txn-search").fill("restaurants");
+    await markersIn(["you", "rule", "pending", "gift"]);
+    await page.getByTestId("toast").waitFor({ state: "detached" });
+    await page.getByTestId("txn-list").evaluate((el) => el.closest("section").scrollIntoView({ block: "start" }));
+    await shot("markers");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await shot("markers-dark");
+    await page.locator('[data-testid=txn] [data-marker="gift"]').first().click();
+    await page.getByTestId("gift-note").waitFor();
+    await shot("gift-txn-dark");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("sheet").waitFor({ state: "detached" });
+    await page.getByTestId("txn-search").fill("");
+    await page.emulateMedia({ colorScheme: "light" });
     // Back to the reports.
     await page.getByTestId("report-spending-by-category").click();
     await page.getByTestId("ranked-row").first().waitFor();
