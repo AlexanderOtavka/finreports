@@ -50,6 +50,12 @@ range), to see one credit card's spending or leave one out. The choice is kept i
 (`accounts=…`) and sticks through report tabs, ranges, drill-downs and the back button; only
 loading a URL without it shows all accounts again.
 
+The tabs (Categories, Monthly, Rules) are an icon over a short name. On a phone they sit
+under the top bar in the browser, where Safari's address bar already floats at the bottom,
+and float at the bottom of the screen in frosted glass once the app is added to the Home
+Screen. From 768px wide (an iPad) they are a rail down the left side, and from 1200px a
+sidebar with the name beside its icon.
+
 A category keeps its color in every chart, range and drill level: the eight biggest
 top-level categories of all time take the eight palette hues, in order (the smaller ones are
 gray and fold into "Other"). Subcategories and merchants are shades of their category's hue.

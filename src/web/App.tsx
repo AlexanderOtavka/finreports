@@ -13,6 +13,7 @@ import { AccountFilter } from "./components/AccountFilter.js";
 import { Chart } from "./components/Chart.js";
 import { RuleSheet } from "./components/RuleSheet.js";
 import { RulesBuilder } from "./components/RulesBuilder.js";
+import { TabIcon } from "./components/TabIcon.js";
 import { TxnList } from "./components/TxnList.js";
 import { applyRule, fillGroups, upsertRule, useLedger, type Change, type LedgerState } from "./ledger.js";
 import { formatMoneyShort, formatRange, dataAsOf, formatSyncTime, isPreset, presetRange, rangeAsOf, RANGE_LABELS, RANGE_TITLES } from "./format.js";
@@ -656,7 +657,8 @@ export function App() {
               }}
               data-testid={`report-${r.id}`}
             >
-              {r.shortTitle}
+              <TabIcon id={r.id} />
+              <span className="tab-label">{r.shortTitle}</span>
             </button>
           ))}
           <button
@@ -670,7 +672,8 @@ export function App() {
             title="Fill in missing merchants and categories with rules"
             data-testid={`report-${BUILDER}`}
           >
-            Rules
+            <TabIcon id={BUILDER} />
+            <span className="tab-label">Rules</span>
           </button>
         </nav>
       </header>
