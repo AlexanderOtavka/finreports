@@ -79,7 +79,7 @@ function toBuilderTxn(row: TxnRow): BuilderTxnDto {
 
 /** Confirmed categories count for more, as in the recategorize sheet's suggestions. */
 const weight = (row: TxnRow): number =>
-  row.category_provenance === "manual" ? 5 : row.category_provenance.startsWith("rule:") ? 3 : 1;
+  row.category_provenance === "manual" ? 5 : row.category_provenance?.startsWith("rule:") ? 3 : 1;
 
 /** The category with the most weight among `rows`, and how many of them are in it. */
 function topCategory(rows: TxnRow[]): { categoryId: string; count: number } | null {

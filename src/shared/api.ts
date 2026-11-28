@@ -32,8 +32,8 @@ export interface TxnDto {
   notes: string | null;
   tags: string[];
   categoryId: string | null;
-  /** `plaid`, `backend`, `manual`, `rule:<id>`, or `none`. */
-  provenance: string;
+  /** `plaid`, `backend`, `manual` or `rule:<id>`; null when there is no category. */
+  provenance: string | null;
   /**
    * Where `merchant` comes from: `none` (there is none; it is the cleaned description), the
    * backend's import (`backend`), someone changing it there (`edited`), `manual`, or `rule:<id>`.
@@ -44,8 +44,11 @@ export interface TxnDto {
    * (the honor system: opening it shows them).
    */
   gift: boolean;
-  /** Where `gift` comes from: `none`, `manual` (marked, or the mark taken off, by hand) or `rule:<id>`. */
-  giftSource: string;
+  /**
+   * Where `gift` comes from: null (nothing marked it), `manual` (marked by hand), `manual:off`
+   * (the mark taken off by hand) or `rule:<id>`.
+   */
+  giftSource: string | null;
 }
 
 /** An account transactions move money in or out of (an asset account, in Firefly's terms). */
@@ -186,7 +189,7 @@ export interface BuilderTxnDto {
   merchant: string | null;
   accountName: string | null;
   categoryId: string | null;
-  provenance: string;
+  provenance: string | null;
 }
 
 /**

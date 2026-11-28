@@ -16,5 +16,8 @@ export const listMerchant = (t: Pick<TxnDto, "gift" | "merchant">): string => (t
 /** The merchant key a chart groups by. */
 export const listMerchantKey = (t: Pick<TxnDto, "gift" | "merchantKey">): string => (t.gift ? GIFT_KEY : t.merchantKey);
 
+/** Whether `source` (a `giftSource`) marks a gift. */
+export const isGiftSource = (source: string | null): boolean => source !== null && source !== "manual:off";
+
 /** Marked as a gift, or unmarked, from `source`. */
-export const withGift = (t: TxnDto, gift: boolean, source: string): TxnDto => ({ ...t, gift, giftSource: source });
+export const withGift = (t: TxnDto, source: string | null): TxnDto => ({ ...t, gift: isGiftSource(source), giftSource: source });

@@ -29,7 +29,8 @@ export interface TxnRow {
   tags: string[];
   backend_category: string | null;
   category_id: string | null;
-  category_provenance: string;
+  /** `plaid`, `backend`, `manual` or `rule:<id>`; null exactly when there is no category. */
+  category_provenance: string | null;
   category_set_at: Date | null;
   backend_dirty: boolean;
   needs_rules: boolean;
@@ -41,11 +42,15 @@ export interface TxnRow {
   backend_merchant: string | null;
   /** `backend`, `edited`, `manual` or `rule:<id>`. */
   merchant_provenance: string;
+  /** Generated: `merchant` differs from `backend_merchant`, so the sync loop writes it through. */
   merchant_dirty: boolean;
   /** Marked as a gift: the app keeps its merchant out of lists, charts and search. */
   gift: boolean;
-  /** `none`, `manual` or `rule:<id>`. */
-  gift_provenance: string;
+  /**
+   * Where `gift` comes from: null (nothing marked it), `manual` (marked by hand), `manual:off`
+   * (unmarked by hand) or `rule:<id>`. `gift` is generated from it.
+   */
+  gift_source: string | null;
 }
 
 export function toDto(row: TxnRow): TxnDto {
@@ -73,7 +78,7 @@ export function toDto(row: TxnRow): TxnDto {
     provenance: row.category_provenance,
     merchantSource: row.merchant === null ? "none" : row.merchant_provenance,
     gift: row.gift,
-    giftSource: row.gift_provenance,
+    giftSource: row.gift_source,
   };
 }
 
@@ -133,6 +138,6 @@ export function snapshot(row: TxnRow): Record<string, unknown> {
     categoryId: row.category_id,
     categoryProvenance: row.category_provenance,
     gift: row.gift,
-    giftProvenance: row.gift_provenance,
+    giftSource: row.gift_source,
   };
 }

@@ -96,7 +96,8 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
 - **Database** (`migrations/`, plain SQL, applied at startup):
   - `txn`: normalized mirror of the backend's transactions, one row per split, with the
     category's **provenance**: `plaid` (the importer's guess from Plaid), `backend` (someone
-    or something in the ledger chose it), `rule:<id>`, `manual`, or `none`. Also the
+    or something in the ledger chose it), `rule:<id>` or `manual`, null when there is no
+    category (also when the ledger's maps to none of ours). Also the
     merchant's website and location (the Plaid connector writes Plaid's into Firefly's
     external URL and latitude/longitude), and the ledger's notes and tags. The merchant has a
     provenance too: the backend's (`backend_merchant`, null when it has none, as for a CSV
@@ -196,7 +197,7 @@ a confidential OAuth client in Firefly (Options → Profile → OAuth) with the 
     The Rules tab lists it only as "Gift rule" with its dates and whether it is active; what it
     matches, its name and what it marked are in its sheet. Moving its dates unmarks what it no
     longer matches; deleting it leaves its gifts as gifts.
-  - The **Gift** switch in a transaction's sheet marks it, or unmarks it, by hand (`manual`):
+  - The **Gift** switch in a transaction's sheet marks it, or unmarks it, by hand (`manual`, or `manual:off`):
     the gift rules leave it as it is from then on. A posted transaction keeps the mark of its
     pending one. The log records `gift` and `ungift` events. Nothing about gifts goes to the
     backend.
@@ -217,7 +218,10 @@ prior category and its provenance), old → new category and provenance, old →
 when someone renamed it (action `rename`, when that was all) or a rule that sets one is
 involved, the rule definition and version if any, and the UI context (report, drill path, date
 range, or the surface, `rules-builder`). Events written since merchants can be set say
-`schemaVersion: 2`. Export it as JSON lines:
+`schemaVersion: 2`. Since `schemaVersion: 3`, a snapshot's `giftSource` (null, `manual`,
+`manual:off` or `rule:<id>`) replaces `gift` + `giftProvenance` (a schema 2 `manual` reads as
+`manual:off` when `gift` is false), and no category's provenance is null rather than `none`.
+Export it as JSON lines:
 
 ```bash
 curl -b "REPORTSSESSION=…" https://firefly.example.com/reports/api/decision-events.jsonl

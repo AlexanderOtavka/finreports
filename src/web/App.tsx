@@ -412,7 +412,7 @@ export function App() {
           ...(req.categoryId ? { categoryId: req.categoryId, provenance: "manual" } : {}),
           ...(req.merchant ? { merchant: req.merchant, merchantKey: merchantKey(req.merchant, t.description), merchantSource: "manual" } : {}),
         };
-        return req.gift !== undefined ? withGift(next, req.gift, "manual") : next;
+        return req.gift !== undefined ? withGift(next, req.gift ? "manual" : "manual:off") : next;
       };
       const apply = (s: LedgerState, idOf: (id: number) => number): LedgerState => {
         const next = rule ? withRule(s, idOf(rule.temp), rule.definition, rule.past) : s;

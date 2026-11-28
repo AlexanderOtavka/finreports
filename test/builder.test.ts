@@ -128,7 +128,7 @@ describe("rules builder (sample backend)", async () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l) as Record<string, unknown>);
-    expect(events[0]).toMatchObject({ action: "rule_create", newMerchant: "Trader Joe's", newCategoryId: "food-and-drink.groceries", schemaVersion: 2 });
+    expect(events[0]).toMatchObject({ action: "rule_create", newMerchant: "Trader Joe's", newCategoryId: "food-and-drink.groceries", schemaVersion: 3 });
     const backfills = events.filter((e) => e.action === "rule_backfill");
     expect(backfills).toHaveLength(tj.size);
     expect(backfills.every((e) => e.oldMerchant === null && e.newMerchant === "Trader Joe's" && e.oldCategoryId === null)).toBe(true);

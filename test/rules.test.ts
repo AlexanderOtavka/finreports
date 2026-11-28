@@ -247,7 +247,7 @@ describe("rules that set the merchant", async () => {
         merchantKey(merchant, f.description),
         f.description,
         f.category ?? null,
-        f.provenance ?? "none",
+        f.provenance ?? (f.category ? "plaid" : null),
         f.needsRules ?? false,
         f.merchantProvenance ?? "backend",
       ],
@@ -306,7 +306,7 @@ describe("rules that set the merchant", async () => {
     expect(await row(transfer)).toMatchObject({ merchant: null, category_id: null });
 
     const events = await db.query("SELECT action, txn_id, old_merchant, new_merchant, old_category_id, new_category_id, new_provenance, schema_version FROM decision_event ORDER BY id");
-    expect(events.rows[0]).toMatchObject({ action: "rule_create", txn_id: null, old_merchant: null, new_merchant: "Trader Joe's", new_category_id: GROCERIES, schema_version: 2 });
+    expect(events.rows[0]).toMatchObject({ action: "rule_create", txn_id: null, old_merchant: null, new_merchant: "Trader Joe's", new_category_id: GROCERIES, schema_version: 3 });
     const backfills = new Map(events.rows.slice(1).map((e) => [e.txn_id, e]));
     expect(backfills.get(csvA)).toMatchObject({ action: "rule_backfill", old_merchant: null, new_merchant: "Trader Joe's", old_category_id: null, new_category_id: GROCERIES, new_provenance: p });
     expect(backfills.get(manual)).toMatchObject({ old_merchant: null, new_merchant: "Trader Joe's", old_category_id: "food-and-drink.coffee", new_category_id: "food-and-drink.coffee", new_provenance: "manual" });

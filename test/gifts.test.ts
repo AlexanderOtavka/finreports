@@ -68,13 +68,13 @@ describe("gifts", async () => {
     );
     ruleId = saved.id;
     expect(saved.backfilled).toBe(1);
-    expect(await row(db, inside)).toMatchObject({ gift: true, gift_provenance: `rule:${ruleId}` });
+    expect(await row(db, inside)).toMatchObject({ gift: true, gift_source: `rule:${ruleId}` });
     for (const id of [before, other, transfer]) expect((await row(db, id)).gift).toBe(false);
   });
 
   it("sends a gift as it is, marked: the app keeps its merchant out of lists and search", async () => {
     expect(toDto(await row(db, inside))).toMatchObject({ merchant: "Etsy", description: "ETSY.COM 5678", gift: true, giftSource: `rule:${ruleId}` });
-    expect(toDto(await row(db, other))).toMatchObject({ gift: false, giftSource: "none" });
+    expect(toDto(await row(db, other))).toMatchObject({ gift: false, giftSource: null });
   });
 
   it("counts a gift rule's gifts and lists them", async () => {
@@ -83,10 +83,10 @@ describe("gifts", async () => {
   });
 
   it("leaves gifts out of the rules builder's groups and look-alikes", async () => {
-    await db.query("UPDATE txn SET category_id = NULL WHERE id = $1", [inside]);
+    await db.query("UPDATE txn SET category_id = NULL, category_provenance = NULL WHERE id = $1", [inside]);
     const all = (await db.query<TxnRow>("SELECT * FROM txn")).rows;
     expect(JSON.stringify(buildGroups(all))).not.toContain("5678");
-    await db.query("UPDATE txn SET category_id = 'general-merchandise.other-general-merchandise' WHERE id = $1", [inside]);
+    await db.query("UPDATE txn SET category_id = 'general-merchandise.other-general-merchandise', category_provenance = 'plaid' WHERE id = $1", [inside]);
   });
 
   it("marks new transactions in its dates as they sync, and not the ones outside", async () => {
@@ -99,10 +99,10 @@ describe("gifts", async () => {
 
   it("unmarked by hand, the rules leave it alone, and the log says so", async () => {
     const res = await recategorize(db, inside, { gift: false }, ME);
-    expect(res.txn).toMatchObject({ merchant: "Etsy", gift: false, giftSource: "manual" });
+    expect(res.txn).toMatchObject({ merchant: "Etsy", gift: false, giftSource: "manual:off" });
     await db.query("UPDATE txn SET needs_rules = true WHERE id = $1", [inside]);
     await applyRulesToPending(db, categories);
-    expect(await row(db, inside)).toMatchObject({ gift: false, gift_provenance: "manual" });
+    expect(await row(db, inside)).toMatchObject({ gift: false, gift_source: "manual:off" });
     const events = await db.query("SELECT action FROM decision_event WHERE txn_id = $1 ORDER BY id", [inside]);
     expect(events.rows).toEqual([{ action: "gift" }, { action: "ungift" }]);
   });
@@ -124,7 +124,7 @@ describe("gifts", async () => {
       saveRule(c, { ruleId, definition: giftRule({ from: "2026-11-13", to: "2026-11-15", contains: "etsy" }), applyToPast: true, actor: ME, categories }),
     );
     expect(moved.backfilled).toBe(1);
-    expect(await row(db, later)).toMatchObject({ gift: false, gift_provenance: "none" });
+    expect(await row(db, later)).toMatchObject({ gift: false, gift_source: null });
 
     await inTransaction(db, (c) =>
       saveRule(c, { ruleId, definition: giftRule({ from: "2026-11-01", to: "2026-11-15", contains: "etsy" }), applyToPast: true, actor: ME, categories }),

@@ -154,10 +154,9 @@ export class SyncService {
     existing: Map<string, TxnRow>,
     categories: CategoryIndex,
   ): Promise<"inserted" | "updated" | "unchanged"> {
-    const fromBackend = {
-      categoryId: b.categoryFromPlaid ? categories.idForPlaid(b.plaid) : categories.idForName(b.category),
-      provenance: b.category === null ? "none" : b.categoryFromPlaid ? "plaid" : "backend",
-    };
+    const categoryId = b.categoryFromPlaid ? categories.idForPlaid(b.plaid) : categories.idForName(b.category);
+    // No source for no category, even when the backend has one that maps to none of ours.
+    const fromBackend = { categoryId, provenance: categoryId === null ? null : b.categoryFromPlaid ? "plaid" : "backend" };
     const fields = {
       group_id: b.groupId,
       date: b.date,
@@ -184,7 +183,7 @@ export class SyncService {
       let category = { id: fromBackend.categoryId, provenance: fromBackend.provenance, dirty: false, needsRules: true };
       // A posted transaction inherits the decision made on its pending authorization.
       const replaced = b.replacesExternalId ? existing.get(b.replacesExternalId) : undefined;
-      if (replaced && (replaced.category_provenance === "manual" || replaced.category_provenance.startsWith("rule:"))) {
+      if (replaced && (replaced.category_provenance === "manual" || replaced.category_provenance?.startsWith("rule:"))) {
         category = {
           id: replaced.category_id,
           provenance: replaced.category_provenance,
@@ -231,11 +230,11 @@ export class SyncService {
       );
       let inserted = res.rows[0]!;
       // And its gift: marked (by hand or by a rule whose dates it may have just left), or unmarked by hand.
-      if (replaced && (replaced.gift || replaced.gift_provenance === "manual")) {
-        const gifted = await client.query<TxnRow>(
-          "UPDATE txn SET gift = $2, gift_provenance = $3 WHERE id = $1 RETURNING *",
-          [inserted.id, replaced.gift, replaced.gift_provenance],
-        );
+      if (replaced && replaced.gift_source !== null) {
+        const gifted = await client.query<TxnRow>("UPDATE txn SET gift_source = $2 WHERE id = $1 RETURNING *", [
+          inserted.id,
+          replaced.gift_source,
+        ]);
         inserted = gifted.rows[0]!;
       }
       existing.set(b.externalId, inserted);
@@ -271,8 +270,7 @@ export class SyncService {
          merchant_key=$9, description=$10, account_id=$11, account_name=$12, counterparty=$13,
          plaid_primary=$14, plaid_detailed=$15, backend_updated_at=$16, synced_at=now(), deleted_at=NULL,
          needs_rules=$17, website=$18, latitude=$19, longitude=$20, notes=$21, tags=$22, backend_merchant=$23,
-         merchant_provenance=CASE WHEN $24 THEN 'edited' ELSE merchant_provenance END,
-         merchant_dirty=(merchant_dirty AND $23::text IS DISTINCT FROM $8::text)
+         merchant_provenance=CASE WHEN $24 THEN 'edited' ELSE merchant_provenance END
          ${backendRecategorized ? ", backend_category=$25, category_id=$26, category_provenance=$27, category_set_at=now()" : ""}
        WHERE id=$1`,
       [
@@ -331,7 +329,7 @@ export class SyncService {
     for (const row of merchants.rows) {
       try {
         await this.adapter.setMerchant(row.external_id, row.merchant);
-        await this.db.query("UPDATE txn SET merchant_dirty = false, backend_merchant = $2 WHERE id = $1 AND merchant = $2", [
+        await this.db.query("UPDATE txn SET backend_merchant = $2 WHERE id = $1 AND merchant = $2", [
           row.id,
           row.merchant,
         ]);

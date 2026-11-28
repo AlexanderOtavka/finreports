@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { migrate } from "../src/server/db.js";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { appRoot, migrate } from "../src/server/db.js";
 import { appendDecision } from "../src/server/decisions.js";
 import { taxonomySeed } from "../src/shared/taxonomy.js";
 import { freshDb } from "./helpers.js";
@@ -62,12 +65,12 @@ describe("migrations", async () => {
 
   it("report_txn computes spend and the top-level category", async () => {
     await db.query(
-      `INSERT INTO txn (backend, external_id, date, amount, type, merchant_key, description, category_id) VALUES
-       ('t', 'a', '2026-01-02', -10, 'withdrawal', 'a', 'a', 'food-and-drink.coffee'),
-       ('t', 'b', '2026-01-02', 4, 'deposit', 'b', 'refund', 'food-and-drink.coffee'),
-       ('t', 'c', '2026-01-02', 100, 'deposit', 'c', 'pay', 'income.salary'),
-       ('t', 'd', '2026-01-02', -50, 'transfer', 'd', 'card payment', 'loan-payments.credit-card-payment'),
-       ('t', 'e', '2026-01-02', -7, 'withdrawal', 'e', 'mystery', NULL)`,
+      `INSERT INTO txn (backend, external_id, date, amount, type, merchant_key, description, category_id, category_provenance) VALUES
+       ('t', 'a', '2026-01-02', -10, 'withdrawal', 'a', 'a', 'food-and-drink.coffee', 'plaid'),
+       ('t', 'b', '2026-01-02', 4, 'deposit', 'b', 'refund', 'food-and-drink.coffee', 'plaid'),
+       ('t', 'c', '2026-01-02', 100, 'deposit', 'c', 'pay', 'income.salary', 'plaid'),
+       ('t', 'd', '2026-01-02', -50, 'transfer', 'd', 'card payment', 'loan-payments.credit-card-payment', 'plaid'),
+       ('t', 'e', '2026-01-02', -7, 'withdrawal', 'e', 'mystery', NULL, NULL)`,
     );
     const res = await db.query("SELECT external_id, top_id, leaf_id, spend FROM report_txn t JOIN txn x USING (id) ORDER BY external_id");
     expect(res.rows).toEqual([
@@ -77,5 +80,91 @@ describe("migrations", async () => {
       { external_id: "d", top_id: "loan-payments", leaf_id: "loan-payments.credit-card-payment", spend: 0 },
       { external_id: "e", top_id: "uncategorized", leaf_id: "uncategorized", spend: 7 },
     ]);
+  });
+});
+
+describe("migrating flags to their sources", async () => {
+  // Up to just before the gifts got a source, so the rows can be in the states it replaces.
+  const dir = mkdtempSync(join(tmpdir(), "finreports-migrations-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const all = readdirSync(join(appRoot(), "migrations")).filter((f) => f.endsWith(".sql")).sort();
+  const copy = (files: string[]) => files.forEach((f) => copyFileSync(join(appRoot(), "migrations", f), join(dir, f)));
+  copy(all.filter((f) => f < "008"));
+  const db = await freshDb({ migrations: dir });
+
+  const insert = (id: string, gift: boolean, provenance: string) =>
+    db.query(
+      `INSERT INTO txn (backend, external_id, date, amount, type, merchant_key, description, gift, gift_provenance)
+       VALUES ('t', $1, '2026-01-01', -1, 'withdrawal', 'k', 'd', $2, $3)`,
+      [id, gift, provenance],
+    );
+
+  it("gives every gift a source, keeping what is marked marked", async () => {
+    await appendDecision(db, { actor: "test", action: "gift", txnSnapshot: { gift: true, giftProvenance: "manual" } });
+    await insert("none", false, "none");
+    await insert("manual", true, "manual");
+    await insert("manual-off", false, "manual");
+    await insert("rule", true, "rule:7");
+    // Neither can be stored any more: a gift from nowhere, and a rule's mark that marks nothing.
+    await insert("gift-from-nowhere", true, "none");
+    await insert("rule-not-gift", false, "rule:7");
+    // And categories: none, one the backend has that maps to none of ours, and one of ours.
+    await db.query(
+      `INSERT INTO txn (backend, external_id, date, amount, type, merchant_key, description, category_id, category_provenance) VALUES
+       ('t', 'cat-none', '2026-01-01', -1, 'withdrawal', 'k', 'd', NULL, 'none'),
+       ('t', 'cat-unmapped', '2026-01-01', -1, 'withdrawal', 'k', 'd', NULL, 'plaid'),
+       ('t', 'cat-plaid', '2026-01-01', -1, 'withdrawal', 'k', 'd', 'food-and-drink.coffee', 'plaid')`,
+    );
+    copy(all.filter((f) => f >= "008"));
+    expect(await migrate(db, dir)).toEqual(all.filter((f) => f >= "008"));
+
+    const rows = await db.query("SELECT external_id, gift, gift_source FROM txn WHERE external_id NOT LIKE 'cat-%' ORDER BY id");
+    expect(rows.rows).toEqual([
+      { external_id: "none", gift: false, gift_source: null },
+      { external_id: "manual", gift: true, gift_source: "manual" },
+      { external_id: "manual-off", gift: false, gift_source: "manual:off" },
+      { external_id: "rule", gift: true, gift_source: "rule:7" },
+      { external_id: "gift-from-nowhere", gift: true, gift_source: "manual" },
+      { external_id: "rule-not-gift", gift: false, gift_source: null },
+    ]);
+    // The log is as it was.
+    const events = await db.query("SELECT schema_version, txn_snapshot FROM decision_event");
+    expect(events.rows).toEqual([{ schema_version: 2, txn_snapshot: { gift: true, giftProvenance: "manual" } }]);
+  });
+
+  it("gives a source only to a category", async () => {
+    const rows = await db.query("SELECT external_id, category_provenance FROM txn WHERE external_id LIKE 'cat-%' ORDER BY id");
+    expect(rows.rows).toEqual([
+      { external_id: "cat-none", category_provenance: null },
+      { external_id: "cat-unmapped", category_provenance: null },
+      { external_id: "cat-plaid", category_provenance: "plaid" },
+    ]);
+    await expect(db.query("UPDATE txn SET category_provenance = 'none' WHERE external_id = 'cat-plaid'")).rejects.toThrow(
+      /txn_category_provenance_check/,
+    );
+    await expect(db.query("UPDATE txn SET category_provenance = 'plaid' WHERE external_id = 'cat-none'")).rejects.toThrow(
+      /txn_category_provenance_category_check/,
+    );
+    await expect(db.query("UPDATE txn SET category_provenance = NULL WHERE external_id = 'cat-plaid'")).rejects.toThrow(
+      /txn_category_provenance_category_check/,
+    );
+  });
+
+  it("derives gift and merchant_dirty, and refuses to store them", async () => {
+    await expect(db.query("UPDATE txn SET gift = true")).rejects.toThrow(/can only be updated to DEFAULT/);
+    await expect(db.query("UPDATE txn SET merchant_dirty = true")).rejects.toThrow(/can only be updated to DEFAULT/);
+    await expect(db.query("UPDATE txn SET gift_source = 'none'")).rejects.toThrow(/check constraint/);
+    await db.query("UPDATE txn SET merchant = 'Y', backend_merchant = 'X' WHERE external_id = 'none'");
+    const dirty = await db.query("SELECT merchant_dirty FROM txn WHERE external_id = 'none'");
+    expect(dirty.rows).toEqual([{ merchant_dirty: true }]);
+  });
+
+  it("only writes a category chosen here, and one that exists", async () => {
+    await expect(db.query("UPDATE txn SET backend_dirty = true, category_id = 'food-and-drink.coffee', category_provenance = 'plaid' WHERE external_id = 'none'")).rejects.toThrow(
+      /txn_backend_dirty_provenance_check/,
+    );
+    await expect(
+      db.query("UPDATE txn SET backend_dirty = true, category_provenance = NULL, category_id = NULL WHERE external_id = 'none'"),
+    ).rejects.toThrow(/txn_backend_dirty_category_check/);
   });
 });
