@@ -129,7 +129,7 @@ a {
 }
 
 .app {
-  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(2rem + var(--bottom-clear));
 }
 /* One column up to tablets in portrait, two from 1000px; the tabs line up with it. */
 :root {
@@ -368,32 +368,200 @@ a {
   opacity: 0.75;
 }
 
-/* The report tabs: AdminLTE's "nav-tabs-custom", a white strip whose active tab is marked
-   with a blue top border. */
+/* The report tabs: an icon over a short name. Where they go depends on the screen:
+   - a phone in the browser: a strip under the navbar. Safari's address bar floats at the
+     bottom already, and a second bar floating there would crowd it;
+   - a phone, opened from the Home Screen: a floating, frosted bar at the bottom, iOS-style;
+   - a tablet or wider: a rail down the left side, under the navbar, the icon over its name;
+   - wide enough (a desktop, an iPad Pro in landscape): AdminLTE's sidebar, as wide as the
+     logo above it, the icon beside its name.
+   --rail-w is the room the side takes, and --bottom-clear what the bottom of the screen
+   keeps out of reach (the home indicator, the floating bar): the toasts rise above it, and
+   the page scrolls past it. */
+:root {
+  --rail-w: 0px;
+  --bottom-clear: env(safe-area-inset-bottom);
+}
 .tabs {
   display: flex;
+  justify-content: center;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
-  padding: 0 0.75rem 0 max(0.75rem, calc((100% - var(--page-max)) / 2 + 0.75rem));
-  overflow-x: auto;
-  scrollbar-width: none;
+  padding: 0 0.5rem;
 }
 .tab {
+  flex: 1 1 0;
+  max-width: 7.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
   background: none;
   border: 0;
-  border-top: 3px solid transparent;
-  padding: 0.55rem 0.9rem 0.6rem;
+  border-bottom: 2px solid transparent;
+  padding: 0.4rem 0.25rem 0.3rem;
   color: var(--text-3);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
   cursor: pointer;
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .tab:hover {
   color: var(--text);
 }
 .tab.active {
-  color: var(--text);
-  border-top-color: var(--accent);
+  color: var(--link);
+  border-bottom-color: var(--accent);
   font-weight: 600;
+}
+.tab-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tab-icon .tab-icon-fill {
+  stroke: none;
+  fill: currentColor;
+  fill-opacity: 0;
+  transition: fill-opacity 0.15s;
+}
+.tab.active .tab-icon .tab-icon-fill {
+  fill-opacity: 0.3;
+}
+
+/* From the Home Screen, a phone's tabs float over the bottom of the page, in frosted glass:
+   the page shows through, blurred, and the active tab sits in a lens of its own. */
+@media (max-width: 767px) {
+  :root[data-standalone] {
+    --tabbar-h: 62px;
+    --tabbar-bottom: max(0.75rem, calc(env(safe-area-inset-bottom) - 0.5rem));
+    --bottom-clear: calc(var(--tabbar-bottom) + var(--tabbar-h));
+  }
+  :root[data-standalone] .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--tabbar-bottom);
+    width: min(100% - 2rem, 24rem);
+    height: var(--tabbar-h);
+    margin: 0 auto;
+    padding: 4px;
+    gap: 2px;
+    border: 1px solid var(--glass-edge);
+    border-radius: 999px;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(16px) saturate(1.8);
+    backdrop-filter: blur(16px) saturate(1.8);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 18%), 0 1px 3px rgb(0 0 0 / 10%), inset 0 1px 0 var(--glass-shine);
+  }
+  :root[data-standalone] .tab {
+    max-width: none;
+    justify-content: center;
+    border: 0;
+    border-radius: 999px;
+    padding: 0 0.25rem;
+    color: var(--text-2);
+    transition: background-color 0.2s;
+  }
+  :root[data-standalone] .tab.active {
+    color: var(--link);
+    background: var(--glass-lens);
+  }
+}
+:root {
+  --glass: rgb(255 255 255 / 62%);
+  --glass-edge: rgb(255 255 255 / 70%);
+  --glass-shine: rgb(255 255 255 / 80%);
+  --glass-lens: rgb(0 0 0 / 6%);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass: rgb(40 44 48 / 62%);
+    --glass-edge: rgb(255 255 255 / 10%);
+    --glass-shine: rgb(255 255 255 / 8%);
+    --glass-lens: rgb(255 255 255 / 9%);
+  }
+}
+
+/* A tablet or wider: a rail down the left, under the navbar, the full width of it a tab. */
+@media (min-width: 768px) {
+  :root {
+    --rail-w: calc(80px + env(safe-area-inset-left));
+  }
+  .app:has(> .topbar .tabs) {
+    padding-left: var(--rail-w);
+  }
+  .tabs {
+    position: fixed;
+    top: var(--topbar-h);
+    bottom: 0;
+    left: 0;
+    width: var(--rail-w);
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 2px;
+    padding: 0.5rem 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+    border-bottom: 0;
+    border-right: 1px solid var(--border-soft);
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .tab {
+    flex: none;
+    max-width: none;
+    gap: 0.25rem;
+    padding: 0.7rem 0.25rem 0.6rem;
+    border-bottom: 0;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+  }
+  .tab:hover {
+    background: var(--hover);
+  }
+  .tab.active {
+    background: var(--accent-soft);
+    border-left-color: var(--accent);
+  }
+}
+/* Wide: the sidebar, as wide as the logo, the icon beside its name. */
+@media (min-width: 1200px) {
+  :root {
+    --rail-w: calc(230px + env(safe-area-inset-left));
+  }
+  .tab {
+    flex-direction: row;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem 0.7rem calc(1rem - 3px);
+    border-right: 0;
+    font-size: 0.95rem;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+  .tab-icon {
+    width: 22px;
+    height: 22px;
+  }
+  /* Centered on the icon by its capitals, not its line box: the line box has more room
+     under the letters than over them, which leaves the name riding high. Trimmed, the g and
+     y hang out of the box, so the box must not clip them; the sidebar is wide enough anyway. */
+  .tab-label {
+    text-box: trim-both cap alphabetic;
+    overflow: visible;
+  }
 }
 
 /* --- Date range: a Bootstrap button group ---------------------------------------------- */
@@ -662,7 +830,7 @@ a {
    search leaves: the header holds still while the list shrinks under it. */
 .txns-area {
   margin: 1rem 0.75rem 0;
-  min-height: calc(100vh - var(--topbar-h) - 2rem - env(safe-area-inset-bottom));
+  min-height: calc(100vh - var(--topbar-h) - 2rem - var(--bottom-clear));
   /* No scroll anchoring on the rows: when a search drops the row Chrome anchored to, it can
      throw the page back to the top instead of letting it settle with the header up top. */
   overflow-anchor: none;
@@ -1388,8 +1556,8 @@ a {
 /* A newer build is cached: reload into it, or later. Above the toast's place. */
 .update-banner {
   position: fixed;
-  left: 50%;
-  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: calc(50% + var(--rail-w) / 2);
+  bottom: calc(1rem + var(--bottom-clear));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -1429,13 +1597,13 @@ a {
   cursor: pointer;
 }
 .update-banner:has(~ .toast) {
-  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  bottom: calc(4.5rem + var(--bottom-clear));
 }
 
 .toast {
   position: fixed;
-  left: 50%;
-  bottom: calc(1rem + env(safe-area-inset-bottom));
+  left: calc(50% + var(--rail-w) / 2);
+  bottom: calc(1rem + var(--bottom-clear));
   transform: translateX(-50%);
   background: #00a65a;
   border: 1px solid #008d4c;
